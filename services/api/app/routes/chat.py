@@ -71,6 +71,49 @@ async def _generate(system: str, messages: list[dict[str, str]], humor_scale: fl
     return quality.normalize(raw)
 
 
+async def _polish(
+    draft: str,
+    *,
+    persona,
+    verdict,
+    relaxed: bool,
+    system: str,
+    messages: list[dict[str, str]],
+) -> tuple[str, quality.QualityReport, bool]:
+    """质量闸门：不合格就重写一次，仍不合格就压形状。
+
+    两个对话端点都必须走这里。之前只有流式端点实现了重写，
+    非流式端点直接 truncate，导致同一句话换一个入口得到两种质量，
+    而且 meta 里看不到任何原因——这类分叉是最难查的。
+    """
+    report = quality.check(draft, persona, humor_scale=verdict.humor_scale, relaxed=relaxed)
+    rewrite_used = False
+
+    if not report.ok:
+        rewrite_used = True
+        try:
+            retry_messages = [
+                *messages,
+                {"role": "assistant", "content": draft},
+                {
+                    "role": "user",
+                    "content": builder.build_rewrite_prompt(persona, draft, report.reason()),
+                },
+            ]
+            second = await _generate(system, retry_messages, verdict.humor_scale)
+            draft, report = second, quality.check(
+                second, persona, humor_scale=verdict.humor_scale, relaxed=relaxed
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not report.ok:
+        # 最后手段：截到合规形状，宁可少一句也不砸一大段
+        draft = quality.truncate_to_shape(draft, persona)
+
+    return draft.strip(), report, rewrite_used
+
+
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest) -> StreamingResponse:
     if not ratelimit.allow(f"chat:{req.device_id or 'anon'}"):
@@ -172,35 +215,14 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             )
 
         # ---- 质量闸门：不合格重写一次 ----
-        report = quality.check(
-            draft, persona, humor_scale=verdict.humor_scale, relaxed=req.expand
+        draft, report, rewrite_used = await _polish(
+            draft,
+            persona=persona,
+            verdict=verdict,
+            relaxed=req.expand,
+            system=system,
+            messages=messages,
         )
-        rewrite_used = False
-        if not report.ok:
-            rewrite_used = True
-            try:
-                retry_messages = [
-                    *messages,
-                    {"role": "assistant", "content": draft},
-                    {
-                        "role": "user",
-                        "content": builder.build_rewrite_prompt(
-                            persona, draft, report.reason()
-                        ),
-                    },
-                ]
-                second = await _generate(system, retry_messages, verdict.humor_scale)
-                report2 = quality.check(
-                    second, persona, humor_scale=verdict.humor_scale, relaxed=req.expand
-                )
-                draft = second
-                report = report2
-            except Exception:  # noqa: BLE001
-                pass
-
-        if not report.ok:
-            # 最后手段：截到合规形状，宁可少一句也不砸一大段
-            draft = quality.truncate_to_shape(draft, persona)
 
         final_text = draft.strip()
 
@@ -254,6 +276,10 @@ async def chat_once(req: ChatRequest) -> dict:
             "template": verdict.template,
         }
 
+    text = verdict.template or ""
+    rep = None
+    rewrite_used = False
+
     if verdict.template:
         text = verdict.template
     else:
@@ -273,17 +299,30 @@ async def chat_once(req: ChatRequest) -> dict:
             extra_directive=extra,
         )
         messages = _build_messages(history, req)
-        text = await _generate(system, messages, verdict.humor_scale)
-        rep = quality.check(text, persona, humor_scale=verdict.humor_scale, relaxed=req.expand)
-        if not rep.ok:
-            text = quality.truncate_to_shape(text, persona)
+        text, rep, rewrite_used = await _polish(
+            await _generate(system, messages, verdict.humor_scale),
+            persona=persona,
+            verdict=verdict,
+            relaxed=req.expand,
+            system=system,
+            messages=messages,
+        )
 
     if _should_store_user(req):
         db.add_message(
             sess["id"], "user", req.message, level=verdict.level, persona_id=persona.id
         )
     mid = db.add_message(
-        sess["id"], "assistant", text.strip(), level=verdict.level, persona_id=persona.id
+        sess["id"],
+        "assistant",
+        text.strip(),
+        level=verdict.level,
+        persona_id=persona.id,
+        meta={
+            "issues": rep.issues if rep else [],
+            "rewrite": rewrite_used,
+            "provider": settings.provider,
+        },
     )
     db.mark_bits(sess["id"], quality.extract_bits(text))
     db.touch_session(sess["id"])

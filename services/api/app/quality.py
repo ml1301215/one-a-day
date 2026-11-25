@@ -17,7 +17,18 @@ EMOJI_RE = re.compile(
 )
 MARKDOWN_RE = re.compile(r"(\*\*|^#{1,6}\s|```|^\s*[-*+]\s|^\s*\d+\.\s)", re.MULTILINE)
 LIST_RE = re.compile(r"^\s*(\d+[.、)]|[-*+•])\s", re.MULTILINE)
-AI_TELL_RE = re.compile(r"(作为一个?\s*AI|作为语言模型|我理解你的感受|希望(对你|能)有(所)?帮助)")
+AI_TELL_RE = re.compile(
+    r"(作为一个?\s*AI|作为语言模型|我理解你的感受|希望(对你|能)有(所)?帮助"
+    r"|我明白你的|你的感受是真实的|这是人之常情|这很正常"
+    r"|从另一个角度|更重要的是|也就是说|总的来说|不知道你有没有"
+    r"|如果你愿意(的话)?[，,]?(可以|不妨))"
+)
+# 分句起头的填充词。这是「模型在组织语言」的痕迹，但只在这个位置违规：
+# 「她其实怕的是」是正常语义，「其实，我觉得」才是废话。
+LEADING_FILLER_RE = re.compile(r"(?:^|[，。！？；、\n])\s*(其实|说白了|总而言之|总之|说到底|换句话说)")
+# 对称排比：这是「像作文」而不是「像消息」的典型标志。
+# 单独一次是修辞，连着两次就是模板。
+PARALLEL_RE = re.compile(r"(不是|并非|不只是)[^。！？\n]{0,14}(而是|是)")
 SENT_SPLIT = re.compile(r"[。！？!?…\n]+")
 
 
@@ -33,8 +44,17 @@ class QualityReport:
         return "；".join(self.issues) if self.issues else ""
 
 
+MIN_SENT_CHARS = 5
+
+
 def count_sentences(text: str) -> int:
-    return len([s for s in SENT_SPLIT.split(text) if s.strip()])
+    """句数。
+
+    短于 5 字的片段不计入：这个人的标志之一就是把一句话硬切成两截
+    （「当众说。我去年也挨过一次。」），前半截是断句不是新句子。
+    按标点硬数会让这种正常断句被判超长，逼模型写回长句、反而更像模型。
+    """
+    return len([s for s in SENT_SPLIT.split(text) if len(s.strip()) >= MIN_SENT_CHARS])
 
 
 _MULTI_NL = re.compile(r"[ \t]*\n[ \t]*(?:\n[ \t]*)+")
@@ -51,6 +71,28 @@ def normalize(text: str) -> str:
     t = _MULTI_NL.sub("\n", t)
     t = "\n".join(line.strip() for line in t.split("\n"))
     return t.strip()
+
+
+def _norm_for_copy(text: str) -> str:
+    return re.sub(r"[\s。，、！？…“”「」『』（）()：:；;]", "", text or "")
+
+
+def copied_from_shots(text: str, persona: Persona, min_len: int = 10) -> str | None:
+    """检查是否原样抄了人格包里的示例句。
+
+    这是个真实发生过的问题：给了 few_shots 之后，模型对「抢功劳」这类场景
+    会直接输出示例的第一句（「改名字这一步还挺费事的」），
+    用户每问一次得到同一句话。示例是用来传递节奏的，不是台词库。
+
+    只比对长度 ≥ min_len 的整句，避免把常用短句误判成抄袭。
+    """
+    t = _norm_for_copy(text)
+    for shot in persona.raw.get("few_shots") or []:
+        for line in str(shot.get("reply", "")).split("\n"):
+            n = _norm_for_copy(line)
+            if len(n) >= min_len and n in t:
+                return line.strip()
+    return None
 
 
 def check(
@@ -89,10 +131,36 @@ def check(
     if AI_TELL_RE.search(t):
         issues.append("出现 AI 腔套话")
 
+    # 「不是A而是B」连用两次以上 = 对称排比，读起来像作文
+    if len(PARALLEL_RE.findall(t)) >= 2:
+        issues.append("出现对称排比（像作文，不像消息）")
+
+    filler = LEADING_FILLER_RE.search(t)
+    if filler:
+        issues.append(f"分句起头用填充词「{filler.group(1)}」")
+
+    # 安全模板（humor_scale=0）本来就是标准话术，与示例重合是设计使然，不算抄
+    copied = copied_from_shots(t, persona)
+    if copied and humor_scale > 0:
+        issues.append(f"照抄了示例句「{copied}」")
+
+    # 通篇没有一句短句，说明是在写段落而不是发消息。
+    # 只作为 issue，不阻断：有时确实需要把一件事讲完。
+    pieces = [s.strip() for s in SENT_SPLIT.split(t) if s.strip()]
+    if len(pieces) >= 3 and min(len(s) for s in pieces) > 16:
+        issues.append("每句都很长，没有短句（像段落，不像消息）")
+
     lowered = t.lower()
     for bit in persona.raw.get("anti_bits", []) or []:
         if bit and bit.lower() in lowered:
             issues.append(f"命中禁用表达「{bit}」")
+
+    # 反 AI 味的句子级黑名单（与 anti_bits 分开：这些是「太像助手」而非「太像鸡汤」）
+    for phrase in ((persona.raw.get("anti_ai_flavor", {}) or {}).get("phrasings") or []):
+        p = str(phrase).strip()
+        # 只对 4 字以上的短语做子串匹配，避免「我懂」这类短词误伤
+        if len(p) >= 4 and p.lower() in lowered:
+            issues.append(f"助手腔「{p}」")
 
     # 危机模板不做长度约束（L3 需要把话说清楚）
     if humor_scale <= 0.0 and n_char > 0:
@@ -110,26 +178,48 @@ def check(
 def truncate_to_shape(text: str, persona: Persona) -> str:
     """最后手段：超长时压到合规形状。
 
-    关键：不能简单截前 N 句。回复的价值在首尾——开头负责「被接住」，
-    结尾负责「明天能做点什么」。中间的解释才是可牺牲的。
-    这与 persona 的 merge_rule（超长先砍 translate）一致。
+    两个约束：
+
+    1. 不能简单截前 N 句。回复的价值在首尾——开头负责「被接住」，
+       结尾负责落点。所以超长时保留第一句 + 最后几句，砍中间的解释。
+
+    2. 用换行拼接，不要用句号拼成一整段。
+       气泡是 pre-wrap 渲染，一句一行才是这个人的断句感；
+       用句号拼接会把四条短句糊成一段，恰好抹掉要保住的东西。
     """
-    parts = [s.strip() for s in SENT_SPLIT.split(text) if s.strip()]
-    limit = persona.sentence_max
+    # 保留原文标点：没有句末标点的片段是被截断的半句，不能当句子用
+    raw_pieces = re.findall(r"[^。！？!?…\n]+[。！？!?…]?", text)
+    parts = [p.strip() for p in raw_pieces if p.strip()]
+    if parts and parts[-1][-1] not in "。！？!?…":
+        # 末尾半句丢掉。留着会出现「…就成了他的。加一列」这种残句
+        parts = parts[:-1]
     if not parts:
         return text.strip()
-    if len(parts) <= limit:
-        keep = parts
-    elif limit <= 2:
-        keep = parts[:limit]
-    else:
-        # 首句 + 末尾若干句，中间的解释性内容让位
-        keep = [parts[0], *parts[-(limit - 1) :]]
 
-    out = "。".join(keep)
-    if out and out[-1] not in "。！？…":
-        out += "。"
-    return out
+    limit = max(1, persona.sentence_max)
+    long_idx = [i for i, p in enumerate(parts) if len(p) >= MIN_SENT_CHARS]
+
+    if len(long_idx) <= limit:
+        chosen = set(range(len(parts)))
+    else:
+        # 首句 + 末尾若干句；短碎片跟随它前面那句
+        keep_idx = [long_idx[0], *long_idx[-(limit - 1) :]] if limit > 1 else long_idx[:1]
+        chosen = set()
+        for i, p in enumerate(parts):
+            if i in keep_idx or (len(p) < MIN_SENT_CHARS and chosen and max(chosen) == i - 1):
+                chosen.add(i)
+
+    lines: list[str] = []
+    for i, p in enumerate(parts):
+        if i not in chosen:
+            continue
+        if len(p) < MIN_SENT_CHARS and lines:
+            lines[-1] += p  # 断句碎片并入上一句，不单独占一行
+            continue
+        if p[-1] not in "。！？…":
+            p += "。"
+        lines.append(p)
+    return "\n".join(lines)
 
 
 def extract_bits(text: str) -> list[str]:
