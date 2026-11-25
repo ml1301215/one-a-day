@@ -1,0 +1,58 @@
+# GitHub Actions 配置。
+#
+# 为什么放在 deploy/ 而不是 .github/workflows/：
+# 推送含 workflow 文件的提交需要 token 具备 `workflow` scope，否则 GitHub 会
+# 直接拒收（refusing to allow an OAuth App to create or update workflow）。
+# 首次发布这台机器的 gh token 没有该 scope，所以先放在这里随仓库走版本管理。
+#
+# 启用方式：
+#   gh auth refresh -s workflow
+#   mkdir -p .github/workflows && git mv deploy/ci.yml .github/workflows/ci.yml
+#   git commit -m "ci: 启用 GitHub Actions" && git push
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    name: API · 测试与金标
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/api/requirements.txt pytest pytest-asyncio
+
+      - name: 单元与接口测试
+        working-directory: services/api
+        run: python -m pytest -q
+
+      - name: 金标回归（危机漏判与越界放行必须为 0）
+        run: python evals/run_evals.py --provider mock
+
+  web:
+    name: Web · 构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装依赖
+        working-directory: apps/web
+        run: npm install --no-audit --no-fund
+
+      - name: 构建
+        working-directory: apps/web
+        run: npm run build

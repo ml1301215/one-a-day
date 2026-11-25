@@ -70,7 +70,7 @@ python evals/run_evals.py && cd services/api && pytest
 ## 提交前检查
 
 ```bash
-# 后端测试（54 项）
+# 后端测试（当前 62 项通过、1 项按设计跳过）
 cd services/api && pytest
 
 # 金标回归（65 条，两条硬门槛）
@@ -81,6 +81,9 @@ cd apps/web && npm run build
 ```
 
 三个都过再提 PR。CI 会跑同样的命令。
+
+CI 配置在 `deploy/ci.yml`（不是 `.github/workflows/`），因为推送 workflow 文件需要
+token 带 `workflow` scope。启用方式写在文件头注释里。
 
 ---
 
