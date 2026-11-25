@@ -401,10 +401,27 @@ class MockProvider:
 
 
 # ===========================================================================
-# OpenAI 兼容
+# OpenAI 兼容（含 DeepSeek：协议一致，端点与模型名不同）
 # ===========================================================================
+def _explain_http_error(status: int, body: str, provider: str) -> str:
+    """把上游状态码翻成能直接照着做的中文，别把原始 JSON 甩给用户。"""
+    hints = {
+        401: "API key 无效或已失效",
+        402: "账户余额不足",
+        403: "该 key 没有访问这个模型的权限",
+        404: "模型名或端点路径不对",
+        429: "触发限流或配额用尽，稍后再试",
+        500: "上游服务内部错误",
+        503: "上游服务过载",
+    }
+    hint = hints.get(status, "上游返回了非 2xx 状态")
+    snippet = body.strip().replace("\n", " ")[:160]
+    return f"{provider} 调用失败（HTTP {status}：{hint}）{('｜' + snippet) if snippet else ''}"
+
+
 class OpenAIProvider:
     name = "openai"
+    key_env = "OAD_OPENAI_API_KEY"
 
     def __init__(self) -> None:
         self.base_url = settings.openai_base_url.rstrip("/")
@@ -423,7 +440,7 @@ class OpenAIProvider:
     ) -> str:
         if not self.api_key:
             raise RuntimeError(
-                "OAD_OPENAI_API_KEY 未设置。要么配置它，要么把 OAD_PROVIDER 设为 mock 或 ollama。"
+                f"{self.key_env} 未设置。要么配置它，要么把 OAD_PROVIDER 设为 mock 或 ollama。"
             )
         payload = {
             "model": self.model,
@@ -442,9 +459,25 @@ class OpenAIProvider:
             r = await client.post(
                 f"{self.base_url}/chat/completions", json=payload, headers=headers
             )
-            r.raise_for_status()
+            if r.status_code >= 400:
+                raise RuntimeError(_explain_http_error(r.status_code, r.text, self.name))
             data = r.json()
         return (data["choices"][0]["message"]["content"] or "").strip()
+
+
+class DeepSeekProvider(OpenAIProvider):
+    """DeepSeek 官方 API：协议与 OpenAI 一致，复用同一个实现。
+
+    端点用 https://api.deepseek.com（带不带 /v1 都能通），模型默认 deepseek-chat。
+    """
+
+    name = "deepseek"
+    key_env = "OAD_DEEPSEEK_API_KEY"
+
+    def __init__(self) -> None:
+        self.base_url = settings.deepseek_base_url.rstrip("/")
+        self.api_key = settings.deepseek_api_key
+        self.model = settings.deepseek_model
 
 
 # ===========================================================================
@@ -489,7 +522,9 @@ def get_provider(name: str | None = None) -> Provider:
     key = (name or settings.provider or "mock").lower()
     if key == "ollama":
         return OllamaProvider()
-    if key in ("openai", "deepseek", "qwen", "compatible"):
+    if key == "deepseek":
+        return DeepSeekProvider()
+    if key in ("openai", "qwen", "moonshot", "compatible"):
         return OpenAIProvider()
     return MockProvider()
 

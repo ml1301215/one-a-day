@@ -38,13 +38,15 @@ def _should_store_user(req: ChatRequest) -> bool:
 
 async def _generate(system: str, messages: list[dict[str, str]], humor_scale: float) -> str:
     provider = get_provider()
-    return await provider.complete(
+    raw = await provider.complete(
         system=system,
         messages=messages,
         temperature=settings.temperature,
         top_p=settings.top_p,
         presence_penalty=settings.presence_penalty,
     )
+    # 真模型常用空行分段，气泡是 pre-wrap，会渲染成明显空档；统一在这里收口
+    return quality.normalize(raw)
 
 
 @router.post("/chat/stream")
@@ -224,12 +226,16 @@ async def chat_once(req: ChatRequest) -> dict:
         text = verdict.template
     else:
         history = db.recent_history(sess["id"], settings.history_turns)
+        extra = builder.variant_directive(req.variant)
+        if req.expand:
+            # 与非流式端点保持同一套拼装，否则两条路径的「展开讲讲」行为不一致
+            extra = (extra + " " + builder.continuation_directive("expand")).strip()
         system = builder.build_system_prompt(
             persona,
             humor_scale=verdict.humor_scale,
             level=verdict.level,
             recent_bits=db.bits_used_recently(sess["id"]),
-            extra_directive=builder.variant_directive(req.variant),
+            extra_directive=extra,
         )
         messages = [*history, {"role": "user", "content": req.message}]
         text = await _generate(system, messages, verdict.humor_scale)

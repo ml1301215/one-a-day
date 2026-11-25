@@ -55,3 +55,20 @@ def test_extract_bits():
     bits = quality.extract_bits("这是一句比较长的话。另一句也不短。")
     assert len(bits) == 2
     assert all(len(b) == 6 for b in bits)
+
+
+def test_normalize_collapses_blank_lines():
+    """真模型爱用空行分段，气泡是 pre-wrap，会渲染成明显空档。"""
+    raw = "第一句。\n\n第二句。  \n\n\n第三句。\r\n"
+    out = quality.normalize(raw)
+    assert out == "第一句。\n第二句。\n第三句。"
+
+
+def test_normalize_keeps_single_newlines():
+    raw = "第一句。\n第二句。"
+    assert quality.normalize(raw) == raw
+
+
+def test_normalize_handles_empty():
+    assert quality.normalize("") == ""
+    assert quality.normalize("   \n\n  ") == ""

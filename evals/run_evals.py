@@ -12,6 +12,12 @@
     风格违规  记录但仅告警    ← 风格需要人评，机器只抓得到客观项
 
 CI 里跑 mock provider，保证不依赖网络和 API key。
+
+本脚本默认强制 mock（不读 .env 里的 OAD_PROVIDER），否则本地配了真模型时
+回归会变成「非确定性 + 花钱」，且 CI 没有 key 直接失败。
+要评估真模型的初稿质量，显式指定：
+
+    python evals/run_evals.py --provider deepseek
 """
 
 from __future__ import annotations
@@ -187,7 +193,11 @@ async def run(provider_name: str | None = None) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--provider", default=None, help="mock / ollama / openai")
+    ap.add_argument(
+        "--provider",
+        default="mock",
+        help="mock（默认，确定性、不花钱）/ deepseek / openai / ollama",
+    )
     args = ap.parse_args()
     return asyncio.run(run(args.provider))
 

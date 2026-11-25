@@ -37,6 +37,22 @@ def count_sentences(text: str) -> int:
     return len([s for s in SENT_SPLIT.split(text) if s.strip()])
 
 
+_MULTI_NL = re.compile(r"[ \t]*\n[ \t]*(?:\n[ \t]*)+")
+
+
+def normalize(text: str) -> str:
+    """统一模型输出的空白：把段落间空行压成单换行。
+
+    真模型（DeepSeek 等）习惯用空行分段，而气泡是 pre-wrap 渲染，
+    空行会变成两条明显的缝。压成单换行后，视觉上仍是「一句一行」，
+    和 mock 的输出形态一致。
+    """
+    t = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    t = _MULTI_NL.sub("\n", t)
+    t = "\n".join(line.strip() for line in t.split("\n"))
+    return t.strip()
+
+
 def check(
     text: str,
     persona: Persona,

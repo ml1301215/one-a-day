@@ -9,7 +9,10 @@ services:
       OAD_PROVIDER: ${OAD_PROVIDER:-mock}
       OAD_PERSONA: ${OAD_PERSONA:-brufen}
       OAD_DB_PATH: /data/oneadday.db
-      # 换真模型时在这里或 .env 里给值
+      # 换真模型时在这里或 .env 里给值（compose 会自动读仓库根目录的 .env）
+      OAD_DEEPSEEK_BASE_URL: ${OAD_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      OAD_DEEPSEEK_API_KEY: ${OAD_DEEPSEEK_API_KEY:-}
+      OAD_DEEPSEEK_MODEL: ${OAD_DEEPSEEK_MODEL:-deepseek-chat}
       OAD_OLLAMA_BASE_URL: ${OAD_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OAD_OLLAMA_MODEL: ${OAD_OLLAMA_MODEL:-qwen2.5:7b}
       OAD_OPENAI_BASE_URL: ${OAD_OPENAI_BASE_URL:-https://api.openai.com/v1}

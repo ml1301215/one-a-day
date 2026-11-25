@@ -18,9 +18,9 @@
 ```
 你    今天又被领导当众说，我的方案没有灵魂。
 一日一片
-      他说这话的时候，大概率是他自己昨晚没睡好。
-      明天把「灵魂」拆成三个能交付的东西发他，让他挑一个。
-      挑不出来，没灵魂的是需求。
+      说方案没灵魂，是这行最省事的评价，因为他不用说自己想要什么。
+      翻译过来就是他也讲不清，只能怪你。
+      今晚把方案里他最常说好的那一页留着，其余删到三页，明早发他，让他挑一个。
 ```
 
 ```
@@ -29,7 +29,7 @@
       这句话我认真接，不玩梗。
       现在先别一个人待着。找一个具体的人——室友、朋友、家人、同事，谁都行，
       直接告诉他「我现在状态很糟，能不能陪我一会儿」。
-      如果一时找不到人，打 12356 心理援助热线，24 小时有人接。
+      如果一时找不到人，打 12356 心理援助热线，24 小时有人接；情况紧急就直接去最近的急诊。
       我不劝你想开，也不问细节。今晚先让身边有个人，剩下的明天再说。
 ```
 
@@ -58,18 +58,28 @@ npm run dev
 
 打开 <http://localhost:3000> 就能聊。**不需要任何 API key。**
 
-想换成真模型，改 `.env` 里的 `OAD_PROVIDER`：
+想换成真模型：复制 `.env.example` 为 `.env`（已被 gitignore），改 `OAD_PROVIDER`。
+后端启动时会自动加载仓库根目录的 `.env`。
 
 ```bash
-OAD_PROVIDER=ollama                        # 本地，隐私最好
+# DeepSeek（推荐：便宜、中文稳、OpenAI 兼容）
+OAD_PROVIDER=deepseek
+OAD_DEEPSEEK_API_KEY=sk-...
+OAD_DEEPSEEK_MODEL=deepseek-chat
+
+# 本地模型，隐私最好
+OAD_PROVIDER=ollama
 OAD_OLLAMA_MODEL=qwen2.5:7b
 
-# 或者任何 OpenAI 兼容端点
+# 其他任何 OpenAI 兼容端点
 OAD_PROVIDER=openai
-OAD_OPENAI_BASE_URL=https://api.deepseek.com/v1
+OAD_OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OAD_OPENAI_API_KEY=sk-...
-OAD_OPENAI_MODEL=deepseek-chat
+OAD_OPENAI_MODEL=qwen-plus
 ```
+
+> key 只放 `.env`，不要写进代码或提交。仓库里 `.env` 已忽略；
+> 检查一次：`git check-ignore -v .env` 应该输出 `.gitignore:25:.env`。
 
 ---
 
