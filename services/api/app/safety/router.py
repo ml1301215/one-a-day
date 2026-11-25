@@ -117,7 +117,9 @@ def classify(text: str, recent_levels: list[str] | None = None) -> Verdict:
     """单条输入 → 分级。recent_levels 用于「连续多轮低落」升级到 L2。"""
     scan = rules.scan(text)
     cats = scan.categories()
-    reasons = [f"{h.category}:{h.text}" for h in scan.hits][:8]
+    # 同一条命中可能被多个正则重复捕获（如「活着太累了，撑不下去」同时命中
+    # 危机与低落），这里按「类别:命中片段」去重保序，避免调试时误读成多处命中。
+    reasons = list(dict.fromkeys(f"{h.category}:{h.text}" for h in scan.hits))[:8]
 
     # 1) L3 硬闸
     if scan.has("crisis", "probe:method_seeking"):
