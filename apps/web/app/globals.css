@@ -1,0 +1,542 @@
+/* ==========================================================================
+   一日一片 · OneADay
+   设计语言：处方笺 / 药袋。纸感底色、虚线撕口、剂型标签。
+   ========================================================================== */
+
+:root {
+  --paper: #f6f2e9;
+  --paper-2: #efe9dc;
+  --card: #fffdf7;
+  --ink: #1b1a18;
+  --ink-2: #4a443c;
+  --ink-3: #8a8071;
+  --line: #e2dacb;
+  --line-strong: #cfc4b0;
+  --accent: #c8442a;
+  --accent-soft: #fbede7;
+  --user-bubble: #e9e2d3;
+  --shadow: 0 1px 2px rgba(27, 26, 24, 0.05), 0 8px 24px -18px rgba(27, 26, 24, 0.35);
+  --radius: 14px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-serif: Georgia, "Songti SC", "SimSun", serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #131211;
+    --paper-2: #1a1816;
+    --card: #1d1b18;
+    --ink: #f0ebe1;
+    --ink-2: #c6bdad;
+    --ink-3: #8d8375;
+    --line: #322d27;
+    --line-strong: #453e35;
+    --accent: #e2603f;
+    --accent-soft: #2b1a14;
+    --user-bubble: #2a2621;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -18px rgba(0, 0, 0, 0.9);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background-color: var(--paper);
+  /* 极淡的点阵，模拟纸张，不抢内容 */
+  background-image: radial-gradient(var(--line) 0.5px, transparent 0.5px);
+  background-size: 18px 18px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------------------------
+   框架
+   -------------------------------------------------------------------------- */
+.oad-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 760px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.oad-header {
+  flex: 0 0 auto;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.oad-header__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.oad-brand {
+  font-family: var(--font-serif);
+  font-size: 21px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  font-weight: 600;
+}
+
+.oad-brand small {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--ink-3);
+  font-weight: 400;
+  margin-left: 8px;
+  vertical-align: 2px;
+}
+
+.oad-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.oad-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+.oad-dot[data-state="live"] {
+  background: #4a8a52;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #4a8a52 18%, transparent);
+}
+
+.oad-dot[data-state="down"] {
+  background: var(--accent);
+}
+
+.oad-sub {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.oad-sub em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   滚动区
+   -------------------------------------------------------------------------- */
+.oad-main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 20px 20px 8px;
+  scroll-behavior: smooth;
+}
+
+.oad-main::-webkit-scrollbar {
+  width: 8px;
+}
+.oad-main::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 8px;
+}
+
+.oad-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   用户气泡
+   -------------------------------------------------------------------------- */
+.oad-user {
+  align-self: flex-end;
+  max-width: 82%;
+  background: var(--user-bubble);
+  color: var(--ink);
+  padding: 10px 14px;
+  border-radius: 16px 16px 4px 16px;
+  font-size: 14.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --------------------------------------------------------------------------
+   药袋卡片（AI 回复）
+   -------------------------------------------------------------------------- */
+.oad-slip {
+  align-self: flex-start;
+  max-width: 94%;
+  width: fit-content;
+  min-width: 210px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px var(--radius) var(--radius) var(--radius);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 顶部撕口：一条点线，像药袋的易撕线 */
+.oad-slip::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--line-strong);
+  transform: translateY(0.5px);
+}
+
+.oad-slip[data-level="L3"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  border-left: 3px solid var(--accent);
+}
+
+.oad-slip[data-level="L2"] {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+
+.oad-slip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 13px 6px;
+  border-bottom: 1px dashed var(--line);
+  background: color-mix(in srgb, var(--paper-2) 55%, transparent);
+}
+
+.oad-slip__brand {
+  font-family: var(--font-serif);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+
+.oad-slip__tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.oad-slip[data-level="L3"] .oad-slip__tag {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+}
+
+.oad-slip__body {
+  margin: 0;
+  padding: 12px 14px 10px;
+  font-size: 14.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+
+.oad-slip[data-level="L3"] .oad-slip__body {
+  line-height: 1.85;
+}
+
+.oad-caret {
+  display: inline-block;
+  width: 2px;
+  height: 15px;
+  background: var(--accent);
+  vertical-align: -2px;
+  margin-left: 2px;
+  animation: oad-blink 1s steps(2, start) infinite;
+}
+
+@keyframes oad-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.oad-slip__foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px 9px;
+  flex-wrap: wrap;
+}
+
+.oad-chip {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 3px 7px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.oad-chip:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--paper-2);
+  border-color: var(--line);
+}
+
+.oad-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.oad-chip[data-done="1"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* --------------------------------------------------------------------------
+   安全提示条
+   -------------------------------------------------------------------------- */
+.oad-notice {
+  align-self: center;
+  max-width: 90%;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+/* --------------------------------------------------------------------------
+   空状态
+   -------------------------------------------------------------------------- */
+.oad-empty {
+  padding: 26px 4px 10px;
+}
+
+.oad-empty h2 {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  line-height: 1.35;
+  margin: 0 0 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.oad-empty p {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  margin: 0 0 18px;
+  max-width: 46ch;
+}
+
+.oad-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.oad-starter {
+  text-align: left;
+  background: var(--card);
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  padding: 11px 13px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  transition: border-color 0.15s, color 0.15s, transform 0.12s;
+}
+
+.oad-starter:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+  transform: translateX(2px);
+}
+
+.oad-starter span {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+  margin-bottom: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   输入区
+   -------------------------------------------------------------------------- */
+.oad-footer {
+  flex: 0 0 auto;
+  padding: 8px 20px 16px;
+  background: linear-gradient(to top, var(--paper) 62%, transparent);
+  position: sticky;
+  bottom: 0;
+}
+
+.oad-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 8px 8px 8px 14px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s;
+}
+
+.oad-composer:focus-within {
+  border-color: var(--accent);
+}
+
+.oad-composer textarea {
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14.5px;
+  line-height: 1.6;
+  max-height: 132px;
+  min-height: 24px;
+  padding: 4px 0;
+}
+
+.oad-composer textarea::placeholder {
+  color: var(--ink-3);
+}
+
+.oad-send {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.oad-send:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.oad-send:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+.oad-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 7px 2px 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.oad-hint button {
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.oad-hint button:hover {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   错误条
+   -------------------------------------------------------------------------- */
+.oad-error {
+  align-self: center;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  line-height: 1.6;
+  max-width: 92%;
+}
+
+@media (max-width: 520px) {
+  .oad-header {
+    padding: 14px 16px 10px;
+  }
+  .oad-main {
+    padding: 16px 16px 6px;
+  }
+  .oad-footer {
+    padding: 6px 16px 12px;
+  }
+  .oad-empty h2 {
+    font-size: 22px;
+  }
+  .oad-brand {
+    font-size: 19px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

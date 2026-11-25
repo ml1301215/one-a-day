@@ -1,0 +1,40 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      OAD_PROVIDER: ${OAD_PROVIDER:-mock}
+      OAD_PERSONA: ${OAD_PERSONA:-brufen}
+      OAD_DB_PATH: /data/oneadday.db
+      # 换真模型时在这里或 .env 里给值
+      OAD_OLLAMA_BASE_URL: ${OAD_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OAD_OLLAMA_MODEL: ${OAD_OLLAMA_MODEL:-qwen2.5:7b}
+      OAD_OPENAI_BASE_URL: ${OAD_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OAD_OPENAI_API_KEY: ${OAD_OPENAI_API_KEY:-}
+      OAD_OPENAI_MODEL: ${OAD_OPENAI_MODEL:-gpt-4o-mini}
+      OAD_RATE_LIMIT: ${OAD_RATE_LIMIT:-30}
+    volumes:
+      - api_data:/data
+    extra_hosts:
+      # 让容器能访问宿主机上的 Ollama
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # 必须走构建参数：rewrites 在 build 阶段固化，运行时环境变量无效
+        API_ORIGIN: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api_data:

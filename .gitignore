@@ -1,0 +1,39 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Node ---
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# --- 本地数据 ---
+services/api/data/
+*.db
+*.db-wal
+*.db-shm
+
+# --- 环境与密钥 ---
+.env
+.env.local
+.env.*.local
+
+# --- 评测产物 ---
+evals/report.json
+
+# --- 编辑器与系统 ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- 其他 ---
+*.log

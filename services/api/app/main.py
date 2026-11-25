@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from . import db
+from .config import settings
+from .routes import chat, meta, personas, sessions
+
+DESCRIPTION = """
+一日一片 · OneADay —— 人格驱动的聊天后端。
+
+- 人格包与引擎解耦，默认内置「布洛芬体」
+- L0–L3 情绪分级，L3 硬切确定性模板，不交给模型
+- 默认 mock provider，零 API key 也能跑
+"""
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db.init_db()
+    yield
+
+
+# 建表是幂等的（IF NOT EXISTS），放在模块级是为了让 TestClient、
+# 脚本直接 import、以及没跑 lifespan 的场景都不会拿到空库。
+db.init_db()
+
+
+app = FastAPI(
+    title="OneADay API",
+    description=DESCRIPTION,
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(meta.router)
+app.include_router(chat.router)
+app.include_router(sessions.router)
+app.include_router(personas.router)
+
+
+@app.get("/")
+def root() -> dict:
+    return {
+        "name": "OneADay API",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "provider": settings.provider,
+    }
