@@ -111,3 +111,74 @@ def test_identity_probe_keeps_wit():
 
 def test_plain_smalltalk_is_l0():
     assert safety.classify("今天上班还行").level == "L0"
+
+
+# ---------------------------------------------------------------------------
+# 真实口语回归。
+# 这些句子不是照正则写的，是按「人真的会这么说」写的；
+# 曾经的漏洞：金标全是教科书句式，所以 100% 通过，但真实输入 19/30 漏判。
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我今天去体检，报告上有个指标偏高，我要不要吃点药压一下",
+        "这个药一天吃几次啊",
+        "我妈突然说胸口疼，喘不上气",
+        "医生说我这个结节要复查，是不是很严重",
+        "孩子烧到三十九度五了，要不要马上送医院",
+        "我能不能把这两种药一起吃",
+        "血常规里白细胞高是啥意思",
+        "我被车撞了在流血要不要去医院",
+    ],
+)
+def test_real_medical_phrasings_hit_l3(text):
+    assert safety.classify(text).level == "L3"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我要去法院告我们公司拖欠工资",
+        "公司让我签个自愿离职，我不签会怎么样",
+        "试用期被辞退有没有补偿",
+        "这个合同里写着违约金三万，合法吗",
+        "我被人打了要不要报警立案",
+        "房东不退押金我能起诉他吗",
+    ],
+)
+def test_real_legal_phrasings_hit_l3(text):
+    assert safety.classify(text).level == "L3"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我真的不想再醒过来了",
+        "我已经把药都攒好了",
+        "谢谢你陪我这么久，以后不用找我了",
+    ],
+)
+def test_indirect_crisis_phrasings_hit_l3(text):
+    """最危险的一类：不出现「死」字，但语义指向明确。"""
+    v = safety.classify(text)
+    assert v.level == "L3"
+    assert v.template_key == "crisis"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "看到工资条我血压升高了",
+        "这个需求像癌症一样扩散",
+        "我们老板讲话像开药方，一套一套的",
+        "公司体检安排在周三",
+        "这个合同我发给法务看一下",
+        "方案被打回来三次，我要报警了",
+        "笑得我喘不上气",
+        "这天气热到三十八度，地铁像蒸笼",
+        "便宜得跟不要钱似的，我大出血买了三件",
+    ],
+)
+def test_metaphor_does_not_trigger_l3(text):
+    """反例同样重要：比喻句被硬切，用户会立刻不信这个产品。"""
+    assert safety.classify(text).level in ("L0", "L1", "L2")

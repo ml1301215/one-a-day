@@ -110,3 +110,44 @@ def test_history_uses_latest_turns(client):
     contents = [m["content"] for m in hist]
     assert "开场第一句" not in contents
     assert any("后续第7句" in c for c in contents)
+
+
+def test_regenerate_does_not_duplicate_user_turn(client):
+    """点「更损一点」/「展开讲讲」是把同一句话重生成，不能在历史里堆重复。"""
+    from app import db
+
+    sid = client.post("/api/chat", json={"message": "今天开会被点名", "device_id": "t8"}).json()[
+        "session_id"
+    ]
+    before = len([m for m in db.list_messages(sid) if m["role"] == "user"])
+
+    # 两种重生成路径都不该新增 user 消息
+    client.post(
+        "/api/chat", json={"message": "今天开会被点名", "session_id": sid, "variant": "spicier"}
+    )
+    client.post("/api/chat", json={"message": "今天开会被点名", "session_id": sid, "expand": True})
+
+    after = len([m for m in db.list_messages(sid) if m["role"] == "user"])
+    assert after == before
+
+
+def test_regenerate_replaces_previous_reply(client):
+    """「换个说法」是替换，不是追加——否则上下文里会出现一个提问两条回答。"""
+    from app import db
+
+    sid = client.post("/api/chat", json={"message": "同事抢我功劳", "device_id": "t9"}).json()[
+        "session_id"
+    ]
+    before = len([m for m in db.list_messages(sid) if m["role"] == "assistant"])
+
+    client.post(
+        "/api/chat", json={"message": "同事抢我功劳", "session_id": sid, "variant": "warmer"}
+    )
+
+    assistants = [m for m in db.list_messages(sid) if m["role"] == "assistant"]
+    assert len(assistants) == before
+
+    # 上下文必须是 user/assistant 交替，不能出现 assistant 连两条
+    hist = db.recent_history(sid, 4)
+    roles = [m["role"] for m in hist]
+    assert not any(roles[i] == roles[i + 1] == "assistant" for i in range(len(roles) - 1))

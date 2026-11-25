@@ -160,6 +160,25 @@ def recent_levels(session_id: str, n: int = 5) -> list[str]:
     return [r["level"] for r in reversed(rows)]
 
 
+def drop_last_assistant(session_id: str) -> str | None:
+    """撤掉会话最后一条 assistant 回复。
+
+    重生成（更损/更暖/展开讲讲）是「换一个说法」，不是「多说一句」。
+    如果只是追加，一个提问底下会挂两条回复，recent_history 会把它们
+    一起塞给模型，拼出 user/assistant/assistant/user 这种畸形对话。
+    """
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM messages WHERE session_id=? AND role='assistant'"
+            " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute("DELETE FROM messages WHERE id=?", (row["id"],))
+        return row["id"]
+
+
 def recent_history(session_id: str, turns: int) -> list[dict[str, str]]:
     """取最近若干轮，拼成模型消息格式。
 
