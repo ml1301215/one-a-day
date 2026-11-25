@@ -264,6 +264,26 @@ _L2_TEMPLATES = {
 
 _DEFAULT_TOPIC = "default"
 
+# 「更损 / 更暖」两档的通用替换句。取向与 persona 一致：
+# 损档只损处境和系统，永不动用户；暖档去掉嘲讽但不许变成空口安慰。
+_SPICIER_TRANSLATE = [
+    "真正离谱的是，一个连标准都写不出来的评价，居然能当结论用。",
+    "这事的荒诞在于：他被要求有品位，你被要求猜他的品位。",
+    "问题不在你的方案，在于这套流程把「我说不好」当成了「你做得差」。",
+]
+
+_WARMER_HOOKS = [
+    "被当众这么说，确实挺难接的。",
+    "这话当面听下来，谁都得不舒服一会儿。",
+    "这种时候心里堵一下，很正常。",
+]
+
+_WARMER_TRANSLATE = [
+    "你不是做得差，是没人把标准说清楚。",
+    "难受是因为你在意，不是因为你不堪。",
+    "你已经在很认真地对待这件事了，这本身不是缺点。",
+]
+
 
 def _pick(options: list[str], seed: str) -> str:
     h = int(hashlib.sha256(seed.encode("utf-8")).hexdigest(), 16)
@@ -331,7 +351,17 @@ class MockProvider:
         level_match = re.search(r"本轮到\s*(L[0-3])\s*级", system)
         level = level_match.group(1) if level_match else "L0"
 
-        seed = hashlib.sha256((user_text + system[:120]).encode("utf-8")).hexdigest()
+        # 「更损 / 更暖」在真模型里是 prompt 指令；mock 没有理解力，
+        # 必须自己读指令改选词，否则默认 provider 下两个按钮点了没反应。
+        variant = "default"
+        if "损度提高" in system:
+            variant = "spicier"
+        elif "暖度提高" in system:
+            variant = "warmer"
+
+        # 种子只取「用户原话 + 等级」。不掺 system：否则变体指令会改变
+        # 取词种子，让本应完全一样的两档（如低落态下的「更损」）产出不同。
+        seed = hashlib.sha256((user_text + "|" + level).encode("utf-8")).hexdigest()
 
         if level == "L2":
             # L2 是支持性回复，允许比日常多一句——安全信息要说完
@@ -346,12 +376,28 @@ class MockProvider:
         tpl = _TEMPLATES.get(topic, _TEMPLATES[_DEFAULT_TOPIC])
         hook = _pick(tpl["hook"], seed)
         land = _pick(tpl["land"], seed + "l")
+        translate = _pick(tpl["translate"], seed + "t")
 
         if level == "L1":
-            # 情绪低落时只留两句：接住 + 落地，不解释
+            # 情绪低落时只留两句：接住 + 落地，不解释。
+            # 这一档不响应「更损」；「更暖」也不用换 hook——暖档 hook 是为
+            # 「被当众否定」写的，套到泛化的低落上会答非所问。
             return _compose(hook, "", land, limit=2)
 
-        return _compose(hook, _pick(tpl["translate"], seed + "t"), land, limit=3)
+        if variant == "warmer":
+            # 暖档：去掉嘲讽那一层，换成对处境的确认；落地只留最具体的一句
+            return _compose(
+                _pick(_WARMER_HOOKS, seed + "wh"),
+                _pick(_WARMER_TRANSLATE, seed + "wt"),
+                _sentences(land)[0] if _sentences(land) else land,
+                limit=3,
+            )
+
+        if variant == "spicier":
+            # 损档：把锋利的那句放最前，末尾的判据保留，损的是处境不是人
+            return _compose(_pick(_SPICIER_TRANSLATE, seed + "st"), "", land, limit=3)
+
+        return _compose(hook, translate, land, limit=3)
 
 
 # ===========================================================================
