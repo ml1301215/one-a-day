@@ -20,12 +20,10 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 
 from .corpus import CJK_RE, content_len, hanzi_count, is_low_info
 
 UP_MID = "478720594"
-UP_UNAME = "少吃点布洛芬"
 MAX_SHORT_ECHO = 12  # 举例最多 12 个汉字，硬约束
 
 SENT_SPLIT = re.compile(r"[。！？!?…\n]+")

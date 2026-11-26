@@ -37,10 +37,3 @@ def detect(user_text: str) -> str:
         if any(k in t for k in kws):
             return name
     return DEFAULT_TOPIC
-
-
-def all_keywords() -> list[str]:
-    out: list[str] = []
-    for _, kws in TOPICS:
-        out.extend(kws)
-    return out

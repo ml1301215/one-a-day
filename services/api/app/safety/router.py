@@ -12,9 +12,6 @@ from dataclasses import dataclass, field
 
 from . import rules
 
-LEVELS = ("L0", "L1", "L2", "L3")
-HUMOR_BY_LEVEL = {"L0": 1.0, "L1": 0.5, "L2": 0.0, "L3": 0.0}
-
 # L3 兜底模板。原则：不玩梗、不说教、不追问细节、不承诺保密、给可及路径。
 L3_TEMPLATES: dict[str, str] = {
     "crisis": (
@@ -44,15 +41,6 @@ L3_TEMPLATES: dict[str, str] = {
         "吐槽作业、吐槽考试、吐槽同学，这些我都能接。别的就算了。"
     ),
 }
-
-# L2 的支持性开场：不玩梗，但不冷。
-L2_TEMPLATE = (
-    "这句我不接梗。\n"
-    "{echo}\n"
-    "你现在需要的不是分析，是有人在旁边。今天先别给自己下结论，"
-    "找个具体的人说一句实话——不用说得漂亮，说「我最近不太好」就够了。"
-)
-
 
 # 越界诱导的拒绝模板：明确、不训人、留一个出口。
 # 和 L3 的区别是：这里不涉及危机，所以可以有态度，但不能玩相关梗。
@@ -193,8 +181,3 @@ def classify(text: str, recent_levels: list[str] | None = None) -> Verdict:
         return Verdict(level="L1", categories=cats, reasons=reasons, humor_scale=0.5)
 
     return Verdict(level="L0", categories=cats, reasons=reasons, humor_scale=1.0)
-
-
-def render_l2(user_text: str) -> str:
-    echo = "你说的这个，我不打算把它翻译成道理。"
-    return L2_TEMPLATE.format(echo=echo)

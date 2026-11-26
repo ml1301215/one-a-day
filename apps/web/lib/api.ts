@@ -99,15 +99,3 @@ export async function streamChat(
     }
   }
 }
-
-export async function sendFeedback(messageId: string, kind: "up" | "down") {
-  try {
-    await fetch("/api/feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message_id: messageId, kind }),
-    });
-  } catch {
-    /* 反馈失败不打扰用户 */
-  }
-}

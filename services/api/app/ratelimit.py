@@ -22,7 +22,3 @@ def allow(key: str, limit: int | None = None, window: float = 60.0) -> bool:
         return False
     q.append(now)
     return True
-
-
-def reset() -> None:
-    _BUCKETS.clear()

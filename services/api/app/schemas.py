@@ -31,22 +31,6 @@ class SessionCreate(BaseModel):
     persona_id: str | None = None
 
 
-class SessionOut(BaseModel):
-    id: str
-    device_id: str
-    persona_id: str
-    created_at: float
-
-
-class MessageOut(BaseModel):
-    id: str
-    role: str
-    content: str
-    level: str | None = None
-    created_at: float
-    meta: dict = {}
-
-
 class FeedbackIn(BaseModel):
     message_id: str
     kind: Literal["up", "down"]

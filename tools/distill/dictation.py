@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import random
-import re
 
 from .corpus import clean_danmaku_rows, content_len, hanzi_count, is_low_info, load_timed_danmaku
 

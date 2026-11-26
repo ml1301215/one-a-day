@@ -30,7 +30,6 @@ WORK = ROOT / ".work"
 # 汉字。统计「字数」时统一用这个，不用 len()——len 会把标点、数字、英文字母
 # 一起算进去，而人格包的长度语义是「汉字数」。
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
-HANZI_RE = CJK_RE
 
 # 一条弹幕/评论里要脱敏的东西。为什么在语料层做而不是展示层做：
 # 下游要按文本去重，@某人 和 bv 号会让「同一条话」看起来不一样；
@@ -100,20 +99,6 @@ def load_timed_danmaku() -> dict:
             "title": str(item.get("title") or ""),
             "duration": item.get("duration"),
             "rows": rows,
-        }
-    return out
-
-
-def load_danmaku_text() -> dict:
-    """{bvid: {title, danmaku: [文本]}}，只有文本、无时间轴。"""
-    raw = _load_json("danmaku.json", {})
-    out = {}
-    for bv, item in (raw or {}).items():
-        if not isinstance(item, dict):
-            continue
-        out[bv] = {
-            "title": str(item.get("title") or ""),
-            "danmaku": [str(x) for x in (item.get("danmaku") or []) if str(x).strip()],
         }
     return out
 
@@ -305,24 +290,5 @@ def clean_danmaku_rows(
             continue
         seen.add(key)
         out.append({"t": float(t), "text": text, "raw": raw})
-    stats["kept"] = len(out)
-    return out, stats
-
-
-def clean_comments(comments: list[dict]) -> tuple[list[dict], dict]:
-    """评论清洗：脱敏 + 去纯情绪，不去重（评论的字数分布本身有用）。"""
-    stats = {"rows": len(comments), "drop_low_info": 0, "drop_short": 0, "kept": 0}
-    out = []
-    for c in comments:
-        text = desensitize(c["text"])
-        if is_low_info(text):
-            stats["drop_low_info"] += 1
-            continue
-        if content_len(text) < 2:
-            stats["drop_short"] += 1
-            continue
-        item = dict(c)
-        item["text"] = text
-        out.append(item)
     stats["kept"] = len(out)
     return out, stats

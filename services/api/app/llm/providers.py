@@ -234,12 +234,6 @@ def _detect_topic(text: str) -> str:
     return _DEFAULT_TOPIC
 
 
-def _clean(text: str) -> str:
-    t = text.strip()
-    t = re.sub(r"^[\s「」\"'`]+|[\s「」\"'`]+$", "", t)
-    return t
-
-
 _SENT_SPLIT = re.compile(r"(?<=[。！？!?])")
 
 

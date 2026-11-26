@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 
 from .. import quality
 from ..persona.loader import Persona
-from . import topics
 from .retrieval import sample_lines
 from .texture import Texture, design_bands
 
@@ -270,8 +269,3 @@ DIVERSITY_HINTS: list[str] = [
 
 def hint_for(index: int) -> str:
     return DIVERSITY_HINTS[index % len(DIVERSITY_HINTS)]
-
-
-def hint_topic(user_text: str) -> str:
-    """候选提示里不带话题，只带形状——话题由检索样本负责，两处都管会打架。"""
-    return topics.detect(user_text)
