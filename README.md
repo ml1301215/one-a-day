@@ -48,6 +48,40 @@
 
 ---
 
+## 架构一览（五张图）
+
+五张图都是**代码生成的**，不是手绘：
+`python tools/figures/generate.py && node tools/figures/render.cjs --format jpeg --quality 92`。
+数字全部从 `texture.json` / 测试计数里读，改数据就重跑；`docs/assets/architecture/*.svg` 是源文件。
+
+**① 一条请求，两段时间** —— 上排一年跑几次（离线蒸馏），下排一秒跑一次（在线生成）。
+中间那道虚线是全世界唯一被两边共享的东西：`texture.json`。
+
+![架构总览](docs/assets/architecture/fig01-architecture.jpg)
+
+**② 一轮请求的七拍** —— 真正让行为变的是第五拍（候选重排）和那条重试通道：
+三条候选全在抄样本时，问题不在候选，在样本。
+
+![生成链路](docs/assets/architecture/fig02-generation.jpg)
+
+**③ 把「像人」拆成三层** —— 纹理（量出来）、样本（检索）、选样（挑一条）。
+三层都能单独关掉，所以改版时能定位到具体哪一层出了问题。
+
+![三层机制](docs/assets/architecture/fig03-three-layers.jpg)
+
+**④ 语料、边界，和一次诚实对账** —— 没有中文逐字稿，所以这份人格是
+「观众实际感知到的他」；最值钱的是他本人敲的 223 条评论，以及那份写清
+「这套方法最可能错在哪」的报告。
+
+![语料与边界](docs/assets/architecture/fig04-corpus.jpg)
+
+**⑤ 安全分级退役** —— v3 在识别到危险时换一个人；v4 让同一个人把语气拨到最认真。
+代价清单和回滚开关都写在图上。
+
+![安全姿态](docs/assets/architecture/fig05-posture.jpg)
+
+---
+
 ## 快速开始
 
 需要 Node 18+、Python 3.11+。
