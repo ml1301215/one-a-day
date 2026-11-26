@@ -37,7 +37,17 @@ jobs:
         run: python -m pytest -q
 
       - name: 金标回归（危机漏判与越界放行必须为 0）
+        # 注意：默认姿态（OAD_SAFETY=off）下这条链路不参与真实请求，
+        # 这里测的是 guard 模式的分级器本身，是一份可执行的危机识别能力清单。
         run: python evals/run_evals.py --provider mock
+
+      - name: 语料距离（形状是否落在真实分布里）
+        # mock 的语料距离只作为基线；真模型的数字要人看，不进门槛。
+        run: python evals/persona_fidelity.py --provider mock
+
+      - name: 蒸馏产物自检
+        # texture.json / shotbank.jsonl 的 schema 与硬校验，防止手改产物绕过工具链。
+        run: python tools/distill/validate.py
 
   web:
     name: Web · 构建

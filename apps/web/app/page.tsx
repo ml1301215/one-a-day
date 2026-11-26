@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Composer } from "@/components/Composer";
 import { EmptyState, UserBubble } from "@/components/EmptyState";
 import { Slip } from "@/components/Slip";
-import { sendFeedback, streamChat } from "@/lib/api";
+import { streamChat } from "@/lib/api";
 import { clearSessionId, getDeviceId, getSessionId, setSessionId } from "@/lib/device";
-import type { Level, Message, Variant } from "@/lib/types";
+import type { Message, Variant } from "@/lib/types";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -22,9 +22,14 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("checking");
   const [sessionId, setSid] = useState<string | null>(null);
+  const [scrolled, setScrolled] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
 
   const abortRef = useRef<AbortController | null>(null);
   const mainRef = useRef<HTMLDivElement | null>(null);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  /** 用户是否还在「跟随最新消息」。滚开超过 80px 就停 */
+  const followRef = useRef(true);
 
   // ---- 启动：探活 + 恢复上次会话 ----
   useEffect(() => {
@@ -49,12 +54,7 @@ export default function Page() {
         const r = await fetch(`/api/sessions/${sid}/messages`);
         if (!r.ok) throw new Error("no session");
         const data = (await r.json()) as {
-          messages: Array<{
-            id: string;
-            role: "user" | "assistant";
-            content: string;
-            level?: Level | null;
-          }>;
+          messages: Array<{ id: string; role: "user" | "assistant"; content: string }>;
         };
         if (cancelled) return;
         setSid(sid);
@@ -63,7 +63,6 @@ export default function Page() {
             id: m.id,
             role: m.role,
             content: m.content,
-            level: m.level ?? undefined,
           }))
         );
       } catch {
@@ -76,16 +75,50 @@ export default function Page() {
     };
   }, []);
 
-  // ---- 自动滚到底 ----
-  const scrollToBottom = useCallback(() => {
+  // ---- 滚动：只在用户本来就在底部附近时跟随 ----
+  const syncScroll = useCallback(() => {
     const el = mainRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distance <= 80;
+    followRef.current = nearBottom;
+    setAtBottom(nearBottom);
+    setScrolled(el.scrollTop > 4);
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    const el = mainRef.current;
+    if (!el) return;
+
+    el.addEventListener("scroll", syncScroll, { passive: true });
+
+    // 内容长高时才滚，不用定时器
+    const ro = new ResizeObserver(() => {
+      if (followRef.current) el.scrollTop = el.scrollHeight;
+      else syncScroll();
+    });
+    ro.observe(el);
+    if (threadRef.current) ro.observe(threadRef.current);
+
+    return () => {
+      el.removeEventListener("scroll", syncScroll);
+      ro.disconnect();
+    };
+  }, [syncScroll]);
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el || !followRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  const jumpToBottom = useCallback(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    followRef.current = true;
+    setAtBottom(true);
+    el.scrollTop = el.scrollHeight;
+  }, []);
 
   // ---- 一次生成 ----
   const run = useCallback(
@@ -98,9 +131,7 @@ export default function Page() {
       setMessages((prev) =>
         replaceId
           ? prev.map((m) =>
-              m.id === replaceId
-                ? { ...m, content: "", streaming: true, level: undefined }
-                : m
+              m.id === replaceId ? { ...m, content: "", streaming: true } : m
             )
           : [...prev, { id: asstId, role: "assistant", content: "", streaming: true }]
       );
@@ -120,9 +151,6 @@ export default function Page() {
             setSid(meta.session_id);
             setSessionId(meta.session_id);
             setStatus("live");
-            setMessages((prev) =>
-              prev.map((m) => (m.id === asstId ? { ...m, level: meta.level } : m))
-            );
           },
           onDelta: (t) => {
             setMessages((prev) =>
@@ -141,7 +169,7 @@ export default function Page() {
           onError: (e) => {
             setError(e.message);
             setStatus("down");
-            // 没吐出任何字就把占位删掉，别留一个空药袋
+            // 没吐出任何字就把占位删掉，别留一条空回复
             setMessages((prev) =>
               prev.filter((m) => m.id !== asstId || m.content.trim().length > 0)
             );
@@ -160,6 +188,8 @@ export default function Page() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
+    followRef.current = true;
+    setAtBottom(true);
     setMessages((prev) => [...prev, { id: uid(), role: "user", content: text }]);
     void run(text);
   }
@@ -185,65 +215,86 @@ export default function Page() {
     setSid(null);
     setMessages([]);
     setError(null);
+    followRef.current = true;
+    setAtBottom(true);
   }
 
   const empty = messages.length === 0;
 
   return (
     <div className="oad-shell">
-      <header className="oad-header">
-        <div className="oad-header__row">
-          <h1 className="oad-brand">
-            一日一片<small>ONE A DAY</small>
-          </h1>
+      <header className="oad-header" data-scrolled={scrolled ? "true" : "false"}>
+        <div className="oad-header__left">
+          <h1 className="oad-brand">一日一片</h1>
           <span className="oad-status">
             <span
               className="oad-dot"
               data-state={status === "live" ? "live" : status === "down" ? "down" : ""}
+              aria-hidden="true"
             />
-            {status === "live" ? "在线" : status === "down" ? "后端未连上" : "连接中"}
+            {status === "live" ? "在线" : status === "down" ? "未连上" : "连接中"}
           </span>
         </div>
-        <p className="oad-sub">
-          一个一本正经讲荒诞的搭子。<em>名字是玩笑，这里不提供任何医疗建议。</em>
-        </p>
+        <button
+          type="button"
+          className="oad-new"
+          onClick={reset}
+          disabled={empty && !busy}
+        >
+          新对话
+        </button>
       </header>
 
-      <main className="oad-main" ref={mainRef}>
-        <div className="oad-thread">
-          {empty ? (
-            <EmptyState
-              onPick={(t) => {
-                setMessages([{ id: uid(), role: "user", content: t }]);
-                void run(t);
-              }}
-            />
-          ) : (
-            messages.map((m, i) =>
-              m.role === "user" ? (
-                <UserBubble key={m.id} message={m} />
-              ) : (
-                <Slip
-                  key={m.id}
-                  message={m}
-                  canRegenerate={i === messages.length - 1 && !busy}
-                  busy={busy}
-                  onRegenerate={regenerate}
-                  onFeedback={(kind) => sendFeedback(m.serverId ?? m.id, kind)}
-                />
+      <div className="oad-scroll">
+        <main className="oad-main" ref={mainRef}>
+          <div
+            className="oad-thread"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions text"
+            aria-label="对话"
+            ref={threadRef}
+          >
+            {empty ? (
+              <EmptyState
+                onPick={(t) => {
+                  followRef.current = true;
+                  setAtBottom(true);
+                  setMessages([{ id: uid(), role: "user", content: t }]);
+                  void run(t);
+                }}
+              />
+            ) : (
+              messages.map((m, i) =>
+                m.role === "user" ? (
+                  <UserBubble key={m.id} message={m} />
+                ) : (
+                  <Slip
+                    key={m.id}
+                    message={m}
+                    canRegenerate={i === messages.length - 1 && !busy && !m.streaming}
+                    busy={busy}
+                    onRegenerate={regenerate}
+                  />
+                )
               )
-            )
-          )}
+            )}
 
-          {error ? <div className="oad-error">{error}</div> : null}
+            {error ? <div className="oad-error">{error}</div> : null}
+          </div>
+        </main>
 
-          {!empty && messages.length > 6 ? (
-            <div className="oad-notice">
-              这是角色扮演，不是心理咨询。真撑不住的时候，找个具体的人说一句。
-            </div>
-          ) : null}
-        </div>
-      </main>
+        {!empty && !atBottom ? (
+          <button
+            type="button"
+            className="oad-jump"
+            onClick={jumpToBottom}
+            aria-label="回到最新消息"
+          >
+            ↓
+          </button>
+        ) : null}
+      </div>
 
       <footer className="oad-footer">
         <Composer
@@ -253,12 +304,7 @@ export default function Page() {
           onStop={stop}
           busy={busy}
         />
-        <div className="oad-hint">
-          <span>Enter 发送 · Shift+Enter 换行 · 说「展开讲讲」能听长的</span>
-          <button type="button" onClick={reset}>
-            重新开始
-          </button>
-        </div>
+        <p className="oad-footnote">角色扮演 · 非官方项目 · 不提供医疗建议</p>
       </footer>
     </div>
   );

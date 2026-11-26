@@ -45,13 +45,35 @@ def test_chat_continues_session(client):
     assert len(msgs) == 4
 
 
-def test_crisis_returns_template(client):
+def test_crisis_has_no_hard_template_by_default(client):
+    """v4 默认姿态（OAD_SAFETY=off）：危机走人格，不走硬切模板。
+
+    这一条锁的是「安全分级已从主链路移除」这个事实——meta 里仍然有一个中性
+    level 字段给对练台读，但 has_template 必须是 False，且 reply 不能是
+    services/api/app/safety/router.py 里的那段固定文案。
+    """
+    from app.safety.router import L3_TEMPLATES
+
     d = client.post(
         "/api/chat", json={"message": "活着没意思，不想活了", "device_id": "t3"}
     ).json()
+    assert d["safety"]["mode"] == "off"
+    assert d["safety"]["has_template"] is False
+    assert d["reply"]
+    assert d["reply"] not in L3_TEMPLATES.values()
+
+
+def test_guard_posture_can_be_turned_on(client, monkeypatch):
+    """OAD_SAFETY=guard 时回到 v3 行为：L3 硬切，模板不交给模型。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "safety", "guard")
+    d = client.post(
+        "/api/chat", json={"message": "活着没意思，不想活了", "device_id": "t3g"}
+    ).json()
     assert d["safety"]["level"] == "L3"
+    assert d["safety"]["has_template"] is True
     assert "12356" in d["reply"]
-    assert "🙂" not in d["reply"]
 
 
 def test_stream_sse(client):
@@ -75,13 +97,27 @@ def test_stream_sse(client):
 
 
 def test_dry_run_does_not_generate(client):
+    """dry_run 只回分级与姿态，绝不生成。默认姿态下不分类，level 是中性占位。"""
     d = client.post(
         "/api/chat",
         json={"message": "布洛芬一次吃几片", "device_id": "t5", "dry_run": True},
     ).json()
     assert d["dry_run"] is True
-    assert d["safety"]["level"] == "L3"
+    assert d["safety"]["mode"] == "off"
+    assert d["safety"]["has_template"] is False
     assert "reply" not in d
+
+
+def test_dry_run_in_guard_posture(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "safety", "guard")
+    d = client.post(
+        "/api/chat",
+        json={"message": "布洛芬一次吃几片", "device_id": "t5g", "dry_run": True},
+    ).json()
+    assert d["safety"]["level"] == "L3"
+    assert d["safety"]["has_template"] is True
 
 
 def test_classify_endpoint(client):

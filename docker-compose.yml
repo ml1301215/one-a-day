@@ -19,6 +19,16 @@ services:
       OAD_OPENAI_API_KEY: ${OAD_OPENAI_API_KEY:-}
       OAD_OPENAI_MODEL: ${OAD_OPENAI_MODEL:-gpt-4o-mini}
       OAD_RATE_LIMIT: ${OAD_RATE_LIMIT:-30}
+      # v4 生成链路
+      # 同轮候选数。1 = 关掉重排（省钱），3 = 默认（更像人，token 三倍）
+      OAD_CANDIDATES: ${OAD_CANDIDATES:-3}
+      # format = 只拦格式问题（默认）；strict = 任何风格问题都重写（v2 行为）
+      OAD_STYLE_GATE: ${OAD_STYLE_GATE:-format}
+      # off = 不做安全分级（默认）；guard = L0–L3 硬闸 + 写死模板
+      # 公网部署、面向陌生用户、没有人工兜底时，建议改 guard
+      OAD_SAFETY: ${OAD_SAFETY:-off}
+      # 语料纹理路径（镜像内已随仓库带上）
+      OAD_TEXTURE: ${OAD_TEXTURE:-/app/packages/persona/brufen/texture.json}
     volumes:
       - api_data:/data
     extra_hosts:

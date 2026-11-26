@@ -93,8 +93,37 @@ class Settings:
     rate_limit_per_min: int = field(default_factory=lambda: _env_int("OAD_RATE_LIMIT", 30))
     history_turns: int = field(default_factory=lambda: _env_int("OAD_HISTORY_TURNS", 8))
 
-    # 多候选挑选（方案 08：同轮生成 3 候选，按人味分选 1）
-    candidates: int = field(default_factory=lambda: _env_int("OAD_CANDIDATES", 1))
+    # 多候选挑选（v4 已实现，见 app/voice/scorer.py）：
+    # 同轮生成 N 条，按语料分布拟合度 + 惩罚项挑一条。
+    # 这是 v3.1 文档里承认「只留了配置项、没实现挑选逻辑」的那个洞。
+    # 默认 3：三条候选覆盖「常规 / 极短 / 不自述」三种形状，
+    # 单条时模型几乎必然写成同一种长度。
+    candidates: int = field(default_factory=lambda: max(1, _env_int("OAD_CANDIDATES", 3)))
+
+    # 风格闸门（v4 语义收窄）：
+    #   format —— 只拦真的不能发的东西（emoji / Markdown / 分点列表 / 空回复）。
+    #             风格与长度交给候选重排，不再靠重写。
+    #   strict —— 任何质量问题都触发重写（v2 行为，留着做 A/B，不再默认）。
+    style_gate: str = field(default_factory=lambda: _env("OAD_STYLE_GATE", "format").lower())
+
+    # 安全分级的运行时姿态：
+    #   off   —— 不在主链路上分级、不给模板、不缩放幽默系数、不拦截越界诱导。
+    #            人格自己承担「怎么接重话」，见 persona.yaml 的 seriousness 一节。
+    #   guard —— v3 的 L0–L3 硬闸 + 写死模板 + 拒绝模板。保留是为了 A/B 对照，
+    #            以及给需要合规部署的人一条显式的开关。
+    safety: str = field(default_factory=lambda: _env("OAD_SAFETY", "off").lower().strip() or "off")
+
+    # 语料纹理：tools/distill 产出的统计画像。缺失时打分器回落到人格包手写标尺。
+    texture_path: str = field(
+        default_factory=lambda: _env(
+            "OAD_TEXTURE",
+            str(PERSONA_DIR / "brufen" / "texture.json"),
+        )
+    )
+
+    @property
+    def guard_enabled(self) -> bool:
+        return self.safety == "guard"
 
     @property
     def persona_path(self) -> Path:

@@ -1,7 +1,7 @@
-"""人格包 v2（蒸馏版）的行为测试。
+"""人格包 v3（引擎版）的行为测试。
 
 这些测试守的不是「代码能跑」，而是本次改版真正要解决的两个问题：
-1. 语流规则有没有真的进到 prompt 里（v1 写了很多规则但 few_shots 从未注入）；
+1. 引擎、语流、真实原话有没有真的进到 prompt 里（v1 写了很多规则但 few_shots 从未注入）；
 2. 「像人」这件事有没有可判定的下限（断句不算超长、AI 腔能被拦下）。
 """
 
@@ -22,13 +22,25 @@ def persona():
     return get_persona(str(settings.persona_path))
 
 
-def test_persona_is_v2_with_speech_rhythm(persona):
-    assert persona.version.startswith("2.")
+def test_persona_is_v4_with_engine_and_mind_model(persona):
+    assert persona.version.startswith("4.")
     raw = persona.raw
-    # v2 的核心结构必须存在，否则等于退回 v1 的「装置驱动」
-    for key in ("speech_rhythm", "verbal_tics", "chat_shape", "anti_ai_flavor", "imagery_pool"):
+    # v4 的核心结构必须存在：
+    # speech_engine 是「谐音伪因果」的发动机，缺了它等于退回 v2 的「只有语流」；
+    # mind_model 是 v4 新增的「先注意什么 / 把错归给谁 / 什么时候不说话」，
+    # 缺了它，回复还是会退化成「每条都在解决问题」；
+    # seriousness 替代了 v3 的 safety，重话由性格承接，不由模板承接。
+    for key in ("speech_engine", "mind_model", "seriousness", "real_quotes",
+                "speech_rhythm", "verbal_tics", "chat_shape", "anti_ai_flavor",
+                "imagery_pool"):
         assert key in raw, f"人格包缺少 {key}"
     assert raw["speech_rhythm"].get("rules"), "语流规则不能为空"
+    assert raw["mind_model"].get("attention"), "mind_model 缺少 attention"
+    assert raw["seriousness"].get("how"), "seriousness 缺少 how"
+    # v3 的 L0–L3 分级表必须已经从人格包里消失
+    assert "safety" not in raw or not isinstance(raw.get("safety"), dict) or not raw["safety"].get("levels"), (
+        "人格包里还留着 L0–L3 分级表，说明安全分级没有真正退役"
+    )
 
 
 def test_system_prompt_injects_few_shots(persona):
@@ -129,7 +141,7 @@ def test_verbal_tics_are_documented_not_spammed(persona):
     for t in tics:
         assert t.get("evidence"), f"{t['word']} 缺证据"
     system = builder.build_system_prompt(persona, level="L0")
-    assert "最多出现一次" in system
+    assert "最多两次" in system
 
 
 def test_truncate_keeps_line_breaks(persona):
@@ -154,9 +166,22 @@ def test_truncate_merges_short_fragment(persona):
 
 
 def test_copied_shot_flagged(persona):
-    """模型会直接抄示例句。抄了就判不合格，让它重写。"""
-    text = "改名字这一步还挺费事的，他居然愿意花这个力气。原稿留着。"
-    rep = quality.check(text, persona, humor_scale=1.0)
+    """模型会直接抄示例句。抄了就判不合格，让它重写。
+
+    v2 这里写死了一句具体台词，结果示例一换，这条用例就变成永远失败的空跑
+    （或者更糟：永远通过但测的是已经不存在的句子）。
+    改成从当前人格包里动态取最长的一句来抄，示例怎么改都能测到真东西。
+    """
+    lines = [
+        ln.strip()
+        for shot in persona.raw["few_shots"]
+        for ln in str(shot.get("reply", "")).split("\n")
+        if ln.strip()
+    ]
+    target = max(lines, key=lambda x: len(re.sub(r"[\s。，、！？…「」（）—]", "", x)))
+    assert len(re.sub(r"[\s。，、！？…「」（）—]", "", target)) >= 12, "示例里没有够长的句子，用例失去意义"
+
+    rep = quality.check(target, persona, humor_scale=1.0)
     assert not rep.ok
     assert "照抄" in rep.reason()
 
@@ -175,3 +200,35 @@ def test_truncate_drops_dangling_fragment(persona):
     out = quality.truncate_to_shape(text, persona)
     assert not out.rstrip().endswith("加一列")
     assert out.endswith("。")
+
+
+def test_self_story_detection(persona):
+    """「讲自己」要能被识别出来，否则连着两轮都在讲自己没人拦得住。"""
+    assert quality.self_story("我上回也这样。")
+    assert quality.self_story("我去年也翻过那个对话框。")
+    assert quality.self_story("我当年也签过。")
+    assert not quality.self_story("明天还得去。")
+    assert not quality.self_story("他这是署名。属名。属谁的。")
+
+
+def test_raw_mode_keeps_style_issues_advisory(persona):
+    """raw 模式：风格类问题只记录，不触发重写。
+
+    v2 的门是「任何 issue 都重写」，结果是模型被按规则改成一句通顺但不像人的话。
+    这条用例锁住 v3 的行为：句数超了照样记录，但不判失败。
+    """
+    # 注意：count_sentences 不计 <5 字的碎片，所以每句都要写成真正的句子，
+    # 否则「第五句。」这种会被当成断句碎片，测不到句数上限。
+    text = "这是一句完整的句子。" * 8
+    strict = quality.check(text, persona, strict=True)
+    loose = quality.check(text, persona, strict=False)
+    assert not strict.ok, "严格模式下超句数必须拦"
+    assert loose.ok, loose.reason()
+    assert any("句数" in i for i in loose.issues), "raw 模式仍要记录，只是不拦"
+
+
+def test_raw_mode_still_blocks_format(persona):
+    """raw 不等于什么都放行：格式与助手腔仍然硬拦。"""
+    assert not quality.check("**重点**在这。", persona, strict=False).ok
+    assert not quality.check("我理解你的感受，这很正常。", persona, strict=False).ok
+    assert not quality.check("今天辛苦了🙂", persona, strict=False).ok
