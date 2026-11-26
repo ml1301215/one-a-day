@@ -20,6 +20,11 @@ class ChatRequest(BaseModel):
     # 只调试安全分级，不生成回复
     dry_run: bool = False
 
+    # 单次请求临时改写风格闸门。默认跟服务端 OAD_STYLE_GATE。
+    # 存在的理由：对练台要能在同一个会话里 A/B 两种闸门，
+    # 否则测出来的差异里永远混着「重启了服务」这一个变量。
+    gate: Literal["raw", "strict"] | None = None
+
 
 class SessionCreate(BaseModel):
     device_id: str = Field(min_length=1, max_length=64)

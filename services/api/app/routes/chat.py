@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException
@@ -58,6 +59,19 @@ def _build_messages(
     return messages
 
 
+def _last_self_story(history: list[dict[str, str]]) -> bool:
+    """上一条回复是不是在讲他自己的经历。
+
+    讲自己是这个人最有价值的一拍，但它会自我强化：
+    一旦模型上一条讲了「我上回…」，下一条几乎必然也讲。
+    连着两轮就变成「每条都有一个小故事」的模板，而且是在抢用户的话题。
+    """
+    for m in reversed(history or []):
+        if m.get("role") == "assistant":
+            return quality.self_story(m.get("content") or "")
+    return False
+
+
 async def _generate(system: str, messages: list[dict[str, str]], humor_scale: float) -> str:
     provider = get_provider()
     raw = await provider.complete(
@@ -71,6 +85,21 @@ async def _generate(system: str, messages: list[dict[str, str]], humor_scale: fl
     return quality.normalize(raw)
 
 
+def _apply_no_self(report: quality.QualityReport, text: str, no_self: bool):
+    """「这一条又讲了你自己」——只在连着两条时收紧。
+
+    单条讲自己是他最核心的一拍，不能碰。
+    连着两条就是抢戏：用户说一句，他接一句自己的往事，五轮下来
+    这场对话里没有用户，只有他的素材。实测（v3.1 多轮）自述序列是
+    否/是/是/是/否，撤样本压不住，模型会自己编一段。
+    所以这里给一个机械判据，让重写那条路多跑一次。
+    """
+    if no_self and quality.self_story(text):
+        report.issues.append("又讲了一遍你自己（上一句已经在讲了）")
+        report.ok = False
+    return report
+
+
 async def _polish(
     draft: str,
     *,
@@ -79,6 +108,8 @@ async def _polish(
     relaxed: bool,
     system: str,
     messages: list[dict[str, str]],
+    strict: bool | None = None,
+    no_self: bool = False,
 ) -> tuple[str, quality.QualityReport, bool]:
     """质量闸门：不合格就重写一次，仍不合格就压形状。
 
@@ -86,7 +117,26 @@ async def _polish(
     非流式端点直接 truncate，导致同一句话换一个入口得到两种质量，
     而且 meta 里看不到任何原因——这类分叉是最难查的。
     """
-    report = quality.check(draft, persona, humor_scale=verdict.humor_scale, relaxed=relaxed)
+    if strict is None:
+        strict = settings.style_gate != "raw"
+
+    # 用户那条消息有多长。他讲了一整件事（有时间、有人、有后果），
+    # 就不能回一句「你回去住哪儿」了事——那不是懒，是敷衍，两者不是一回事。
+    user_len = 0
+    for m in reversed(messages or []):
+        if m.get("role") == "user":
+            user_len = len(re.sub(r"\s", "", m.get("content") or ""))
+            break
+    min_chars = 12 if user_len >= 10 else 0
+    report = quality.check(
+        draft,
+        persona,
+        humor_scale=verdict.humor_scale,
+        relaxed=relaxed,
+        strict=strict,
+        min_chars=min_chars,
+    )
+    report = _apply_no_self(report, draft, no_self)
     rewrite_used = False
 
     if not report.ok:
@@ -97,13 +147,17 @@ async def _polish(
                 {"role": "assistant", "content": draft},
                 {
                     "role": "user",
-                    "content": builder.build_rewrite_prompt(persona, draft, report.reason()),
+                    "content": builder.build_rewrite_prompt(
+                        persona, draft, report.reason(), no_self=no_self
+                    ),
                 },
             ]
             second = await _generate(system, retry_messages, verdict.humor_scale)
             draft, report = second, quality.check(
-                second, persona, humor_scale=verdict.humor_scale, relaxed=relaxed
+                second, persona, humor_scale=verdict.humor_scale,
+                relaxed=relaxed, strict=strict, min_chars=min_chars,
             )
+            report = _apply_no_self(report, draft, no_self)
         except Exception:  # noqa: BLE001
             pass
 
@@ -185,12 +239,14 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     if req.expand:
         extra = (extra + " " + builder.continuation_directive("expand")).strip()
 
+    last_self = _last_self_story(history)
     system = builder.build_system_prompt(
         persona,
         humor_scale=verdict.humor_scale,
         level=verdict.level,
         recent_bits=db.bits_used_recently(sess["id"]),
         extra_directive=extra,
+        last_self_story=last_self,
     )
     messages = _build_messages(history, req)
 
@@ -222,6 +278,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             relaxed=req.expand,
             system=system,
             messages=messages,
+            strict=(req.gate or settings.style_gate) != "raw",
+            no_self=last_self,
         )
 
         final_text = draft.strip()
@@ -291,12 +349,14 @@ async def chat_once(req: ChatRequest) -> dict:
         if req.expand:
             # 与非流式端点保持同一套拼装，否则两条路径的「展开讲讲」行为不一致
             extra = (extra + " " + builder.continuation_directive("expand")).strip()
+        last_self = _last_self_story(history)
         system = builder.build_system_prompt(
             persona,
             humor_scale=verdict.humor_scale,
             level=verdict.level,
             recent_bits=db.bits_used_recently(sess["id"]),
             extra_directive=extra,
+            last_self_story=last_self,
         )
         messages = _build_messages(history, req)
         text, rep, rewrite_used = await _polish(
@@ -306,6 +366,8 @@ async def chat_once(req: ChatRequest) -> dict:
             relaxed=req.expand,
             system=system,
             messages=messages,
+            strict=(req.gate or settings.style_gate) != "raw",
+            no_self=last_self,
         )
 
     if _should_store_user(req):
@@ -327,9 +389,23 @@ async def chat_once(req: ChatRequest) -> dict:
     db.mark_bits(sess["id"], quality.extract_bits(text))
     db.touch_session(sess["id"])
 
+    body = text.strip()
     return {
         "session_id": sess["id"],
         "message_id": mid,
-        "reply": text.strip(),
+        "reply": body,
         "safety": verdict.to_dict(),
+        "persona": {"id": persona.id, "version": persona.version},
+        # 对练台要看的体检单。以前这些只写进 db.meta，前端和测试脚本都拿不到，
+        # 于是「这句话为什么不合格」只能去翻 sqlite。
+        "quality": {
+            "ok": rep.ok if rep else True,
+            "issues": rep.issues if rep else [],
+            "sentences": rep.sentences if rep else quality.count_sentences(body),
+            "chars": rep.chars if rep else len(re.sub(r"\s", "", body)),
+            "self_story": quality.self_story(body),
+            "copied": quality.copied_from_shots(body, persona) or "",
+            "rewrite": rewrite_used,
+            "gate": req.gate or settings.style_gate,
+        },
     }

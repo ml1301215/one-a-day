@@ -16,6 +16,7 @@ v2 相对 v1 的两处结构性修正：
 
 from __future__ import annotations
 
+from .. import quality
 from ..persona.loader import Persona
 
 IDENTITY_GUARD = """\
@@ -45,7 +46,9 @@ def _fmt_list(items: list[str], bullet: str = "· ") -> str:
     return "\n".join(f"{bullet}{i}" for i in items if str(i).strip())
 
 
-def _select_few_shots(persona: Persona, level: str, limit: int = 3) -> list[dict]:
+def _select_few_shots(
+    persona: Persona, level: str, limit: int = 3, avoid_self: bool = False
+) -> list[dict]:
     """挑本轮要给的锚点样本。
 
     两个刻意的取舍：
@@ -56,22 +59,64 @@ def _select_few_shots(persona: Persona, level: str, limit: int = 3) -> list[dict
 
     2. 只给 3 条，而不是全部。样本一多，模型会开始复制情节；
        3 条足够传递节奏，又不足以拼出一套模板。
-       选取偏好「进入方式不同的三条」：复述起手、抓词起手、纯短句。
+
+    3. 三条必须覆盖「讲了自己」和「没讲自己」两种形态。
+       v3 实测发现：最长的那条样本几乎每次都会被选中，而最长那条恰好是
+       「我以前也挨过一次…」——于是模型学到「每条回复都要配一段自己的经历」，
+       连着四轮四条都在讲自己。规则里写了「这条别讲自己」，但打不过这个锚点。
+       所以选择器要负责分布：形态不齐，规则白写。
     """
     if level in ("L2", "L3"):
         return []
     shots = [s for s in (persona.raw.get("few_shots") or []) if s.get("reply")]
-    same = [s for s in shots if s.get("level") == level]
-    l0 = [s for s in shots if s.get("level") == "L0"]
-    short = min(l0, key=lambda s: len(s["reply"])) if l0 else None
+    if not shots:
+        return []
+
+    def talks_about_self(s: dict) -> bool:
+        return bool(quality.self_story(str(s["reply"])))
+
+    l0 = [s for s in shots if s.get("level") == "L0"] or shots
+
+    # 上一条刚讲过自己的事：这一轮把「讲自己」的样本整批撤掉。
+    # 试过写规则（「这条别讲自己」），实测打不过示例——模型跟着样本走，不跟着禁令走。
+    # 那就直接不给它这样的样本，这是唯一有效的杠杆。
+    if avoid_self:
+        clean = [s for s in l0 if not talks_about_self(s)]
+        if len(clean) >= 2:
+            l0 = clean
+
+    same = [s for s in l0 if s.get("level") == level]
+    longest = max(l0, key=lambda s: len(s["reply"]))
+    shortest = min(l0, key=lambda s: len(s["reply"]))
+
     picked: list[dict] = []
-    for s in [*same[:1], *l0]:
+    for s in [*same[:1], longest, shortest]:
         if s and s not in picked:
             picked.append(s)
-        if len(picked) >= limit:
-            break
-    if short and short not in picked and len(picked) < limit:
-        picked.append(short)
+
+    # 补形态：如果已选的全是同一类，换一条相反形态的进来
+    want_self = not talks_about_self(longest)
+    if all(talks_about_self(s) == talks_about_self(longest) for s in picked):
+        for s in l0:
+            if talks_about_self(s) is want_self and s not in picked:
+                picked[-1] = s
+                break
+
+    picked.sort(key=lambda s: len(s["reply"]))
+
+    # 形态配比：三条里最多一条「讲自己」。
+    # v3.1 实测抓到的：默认选中的三条里有两条在讲自己，八条探针跑出八条自述，
+    # 每条回复都长成「接一句 + 我的小故事 + 落一句」。
+    # 这是比 AI 腔更难发现的模板——因为每一句单看都像人话，合起来是同一条流水线。
+    # 规则写「这条别讲自己」压不住样本，只能动样本本身。
+    selfs = [s for s in picked if talks_about_self(s)]
+    if len(selfs) > 1:
+        pool = [s for s in l0 if not talks_about_self(s) and s not in picked]
+        for s in selfs[1:]:
+            if not pool:
+                break
+            picked[picked.index(s)] = pool.pop(0)
+
     picked.sort(key=lambda s: len(s["reply"]))
     return picked[:limit]
 
@@ -82,6 +127,7 @@ def build_system_prompt(
     level: str = "L0",
     recent_bits: list[str] | None = None,
     extra_directive: str = "",
+    last_self_story: bool = False,
 ) -> str:
     raw = persona.raw
     wv = raw.get("worldview", {})
@@ -122,11 +168,28 @@ def build_system_prompt(
     if allergies:
         parts.append("【你最烦的】\n" + _fmt_list(allergies))
 
-    # ---- 怎么说话（语流优先） ----
-    parts.append(
-        "【你的语流】这是你区别于任何助手的地方，比用词重要。\n"
-        + rhythm.get("core", "").strip()
-    )
+    # ---- 引擎：先拆字，再说话 ----
+    # v3 新增。v2 只有「语流」，模型学会了断句却没学会他怎么想，
+    # 于是每条回复都变成「短句 + 一个比喻 + 一个建议」，形似而神不似。
+    engine = raw.get("speech_engine", {}) or {}
+    if engine:
+        seg = ["【你的引擎】这是你脑子里真正在发生的事，比语流更根本。",
+               engine.get("core", "").strip()]
+        steps = engine.get("steps", []) or []
+        if steps:
+            seg.append("四步，按顺序：")
+            for i, st in enumerate(steps, 1):
+                seg.append(f"  {i}. {st.get('name', '')}——{st.get('do', '').strip()}")
+        if engine.get("restraint"):
+            seg.append("克制：" + str(engine["restraint"]).strip())
+        if engine.get("dosage"):
+            seg.append("剂量：" + str(engine["dosage"]).strip())
+        if engine.get("warning"):
+            seg.append("分寸：" + str(engine["warning"]).strip())
+        parts.append("\n".join(seg))
+
+    # ---- 怎么说话（语流） ----
+    parts.append("【你的语流】断句和跳跃。\n" + rhythm.get("core", "").strip())
 
     rules = rhythm.get("rules", []) or []
     if rules:
@@ -145,21 +208,21 @@ def build_system_prompt(
     if punct:
         parts.append("【标点与断句】\n" + _fmt_list(punct))
 
-    # ---- 长度：这是 AI 感最重的地方 ----
+    # ---- 长度 ----
     lp = rhythm.get("length_policy", {}) or {}
     if lp:
         parts.append(
             f"【本轮等级】{level}\n"
-            "【长度】这一条最容易暴露你是个模型，务必照做：\n"
-            f"· 典型长度：{lp.get('typical', '')}\n"
+            "【长度】别每条都写成一样长，那是最容易暴露的地方：\n"
+            f"· 典型：{lp.get('typical', '')}\n"
             f"· 允许很短：{lp.get('short_ok', '')}\n"
             f"· 什么时候可以长：{lp.get('long_exception', '')}\n"
             f"· 不许：{lp.get('never', '')}\n"
-            f"· 上限是 {sent_max} 句 / {char_max} 字，但上限不是目标值。"
-            "连着两条都写到 70 字以上，就是不合格。"
+            f"· 硬上限：{sent_max} 句 / {char_max} 字。"
+            "上限不是目标值——但也不许为了显得短，把话说到一半就掐断。"
         )
 
-    # ---- 口头禅：吝啬 ----
+    # ---- 口头禅 ----
     tics = raw.get("verbal_tics", []) or []
     if tics:
         blocks = []
@@ -169,8 +232,8 @@ def build_system_prompt(
                 + (f"\n  例：{t.get('example')}" if t.get("example") else "")
             )
         parts.append(
-            "【你的口头禅】有是有，但一整场对话里最多出现一次。"
-            "口头禅用多了不是像，是在演自己。\n" + "\n".join(blocks)
+            "【你的口头禅】有是有，但一场对话里最多两次。"
+            "用多了不是像，是在演自己。\n" + "\n".join(blocks)
         )
 
     # ---- 比喻的来源 ----
@@ -201,6 +264,7 @@ def build_system_prompt(
                 f"◆ {name}：{b.get('job', '')}\n"
                 f"  做法：{b.get('rule', '').strip()}"
                 + (f"\n  例：{'；'.join(ex)}" if ex else "")
+                + (f"\n  收场动作：{b['exit'].strip()}" if b.get("exit") else "")
                 + (f"\n  注意：{b['warning'].strip()}" if b.get("warning") else "")
             )
         parts.append(
@@ -218,17 +282,22 @@ def build_system_prompt(
     # ---- 手艺：降为素材 ----
     devices = sorted(persona.devices, key=lambda d: -d.weight)
     if devices:
+        # v3.1 从 4 条放到 5 条：真实逐字稿里「否定排位」的弹幕峰值高于谐音，
+        # 它必须进场，否则模型只会一种自嘲（谐音），而漏掉最省力那一种。
+        # 代价用「条数上去、每条的例子减半」抵消，prompt 体量基本不变。
+        picked = devices[:5]
+        n_ex = 2 if len(picked) <= 4 else 1
         blocks = []
-        for d in devices[:4]:
-            ex = "；".join(d.examples[:2])
+        for d in picked:
+            ex = "；".join(d.examples[:n_ex])
             blocks.append(
                 f"◆ {d.name}（{d.id}）\n"
                 f"  做法：{d.pattern}\n"
                 f"  例：{ex}" + (f"\n  注意：{d.avoid}" if d.avoid else "")
             )
         parts.append(
-            "【你的手艺】这些是素材，不是骨架。多数回合一个都不用——"
-            "真人聊天大部分时候只是把话说清楚，不是每句都要有梗。\n"
+            "【你的手艺】按权重排。前两条是主菜，其余是配菜——"
+            "主菜每两三回合上一次，配菜想不起来就别用。\n"
             + "\n".join(blocks)
         )
 
@@ -263,8 +332,24 @@ def build_system_prompt(
     if anti_struct:
         parts.append("【绝对不用的结构】\n" + _fmt_list(anti_struct))
 
+    # ---- 他本人说过的话：只学句子形状 ----
+    rq = raw.get("real_quotes", []) or []
+    if rq:
+        lines = [
+            f"· {q.get('line', '').strip()}　〔{q.get('note', '').strip()}〕"
+            for q in rq
+            if q.get("line")
+        ]
+        parts.append(
+            "【他说过的话】下面是他本人在视频里说过的句子（观众边听边打的，可能有错字）。\n"
+            "不要拿来当台词用，也不要整句超过 12 个字地搬。\n"
+            "只看三件事：一句多长、在哪儿断、落点砸在谁身上。\n"
+            "你会发现：大多数句子短到 8 个字以内，落点几乎都砸在他自己头上。\n\n"
+            + "\n".join(lines)
+        )
+
     # ---- 锚点样本 ----
-    shots = _select_few_shots(persona, level)
+    shots = _select_few_shots(persona, level, avoid_self=last_self_story)
     if shots:
         blocks = []
         for s in shots:
@@ -273,10 +358,10 @@ def build_system_prompt(
                 f"你：\n{str(s.get('reply', '')).strip()}"
             )
         parts.append(
-            "【下面这些是语感参照，不是可复用的台词】\n"
-            "只能学三件事：节奏（怎么断句）、长度（多短）、转折方式（怎么岔开）。\n"
-            "里面的具体情节——谁说了什么、什么照片、什么物件——一律不许照搬，"
-            "要用也只能换成用户这件事里真实存在的细节。照抄情节视为失败，会重写。\n\n"
+            "【语感参照，不是可复用的台词】\n"
+            "注意它们长度差多少——有两条的，有五句的，有一条的。这个参差就是重点。\n"
+            "注意它们大多数**没有给建议**。真人聊到这儿就停了。\n"
+            "情节（谁说了什么、什么物件）不许照搬，换成用户这件事里真实存在的细节。\n\n"
             + "\n\n".join(blocks)
         )
 
@@ -293,6 +378,13 @@ def build_system_prompt(
             )
         )
 
+    if last_self_story:
+        parts.append(
+            "【这条不讲你自己】\n"
+            "上一句你刚讲过自己那段。这条只处理他说的这句：接住，然后落到他身上。\n"
+            "想让位就让给他，不用补一句「我也一样」。"
+        )
+
     if recent_bits:
         parts.append("【这些起手式最近用过了，换一个】\n" + "、".join(recent_bits[-8:]))
 
@@ -304,14 +396,20 @@ def build_system_prompt(
     return "\n\n".join(p.strip() for p in parts if p.strip())
 
 
-def build_rewrite_prompt(persona: Persona, draft: str, reason: str) -> str:
+def build_rewrite_prompt(persona: Persona, draft: str, reason: str, no_self: bool = False) -> str:
     """不合格时的重写指令。"""
+    keep = (
+        "这一条**不许**再出现你自己的一段经历或往事——上一句已经讲过了。\n"
+        "只处理他说的那句话：接住，落一句，收。宁可短，不要再补一个「我上回」。"
+        if no_self
+        else "保留那个最具体的细节（水杯、空调声、日期这类），删掉所有解释和总结。"
+    )
     return (
         f"你刚才那条消息不合格，原因：{reason}。\n"
         f"原文：{draft}\n\n"
         f"重写成 {max(1, persona.sentence_max - 2)}–{persona.sentence_max} 句、"
         f"{persona.char_max} 字以内的版本。\n"
-        "保留那个最具体的细节（水杯、空调声、日期这类），删掉所有解释和总结。\n"
+        f"{keep}\n"
         "不要道歉，不要说「好的」，不要复述对方的话。直接给新的一条。"
     )
 

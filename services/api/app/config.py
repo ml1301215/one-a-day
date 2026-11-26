@@ -96,6 +96,11 @@ class Settings:
     # 多候选挑选（方案 08：同轮生成 3 候选，按人味分选 1）
     candidates: int = field(default_factory=lambda: _env_int("OAD_CANDIDATES", 1))
 
+    # 风格闸门：
+    #   strict —— 任何风格问题都触发重写（v2 行为，稳但平）
+    #   raw    —— 只拦格式/助手腔/禁用词/严重超长，风格问题只记录（v3 默认）
+    style_gate: str = field(default_factory=lambda: _env("OAD_STYLE_GATE", "raw").lower())
+
     @property
     def persona_path(self) -> Path:
         return PERSONA_DIR / self.persona_id / "persona.yaml"

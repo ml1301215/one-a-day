@@ -14,7 +14,9 @@ def test_accepts_good_reply():
 
 
 def test_rejects_too_long():
-    text = "。".join(["这是一句话"] * 6) + "。"
+    # v3 把上限抬到 6 句 / 140 字（他的真实句子比 v2 假设的长），
+    # 所以用 9 句来验证「超了仍然会被拦」，而不是去改上限本身。
+    text = "。".join(["这是一句话"] * 9) + "。"
     r = quality.check(text, PERSONA)
     assert not r.ok
     assert any("句数" in i for i in r.issues)
