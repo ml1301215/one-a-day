@@ -14,8 +14,10 @@ from .routes import chat, meta, personas, sessions
 DESCRIPTION = """
 一日一片 · OneADay —— 人格驱动的聊天后端。
 
-- 人格包与引擎解耦，默认内置「布洛芬体」
-- L0–L3 情绪分级，L3 硬切确定性模板，不交给模型
+- 人格包与引擎解耦，默认内置「布洛芬体」v4
+- 生成链路：检索样本 → 多候选生成 → 按语料分布重排（app/voice/）
+- 语料纹理（texture.json）来自 tools/distill 对 19553 条弹幕 + 10972 条评论的统计
+- 安全分级默认关闭（OAD_SAFETY=off）；需要合规部署时可显式开成 guard
 - 默认 mock provider，零 API key 也能跑
 """
 

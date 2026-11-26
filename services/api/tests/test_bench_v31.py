@@ -32,8 +32,8 @@ def client():
 # ---------------------------------------------------------------- 人格包
 
 
-def test_persona_is_v31(persona):
-    assert persona.version == "3.1.0"
+def test_persona_is_v4(persona):
+    assert persona.version == "4.0.0"
 
 
 def test_engine_has_dosage_rule(persona):
@@ -107,7 +107,10 @@ def test_chat_returns_quality_report(client):
     for k in ("ok", "issues", "sentences", "chars", "self_story", "copied", "rewrite", "gate"):
         assert k in q
     assert isinstance(q["self_story"], bool)
-    assert d["persona"]["version"] == "3.1.0"
+    assert d["persona"]["version"] == "4.0.0"
+    # v4：候选重排的体检单要能被看到，否则「为什么挑了这一条」又只能去翻 sqlite
+    assert "candidates" in q
+    assert "texture" in q
 
 
 def test_gate_can_be_overridden_per_request(client):

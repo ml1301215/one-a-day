@@ -88,24 +88,76 @@ def _norm_for_copy(text: str) -> str:
     return re.sub(r"[\s。，、！？…“”「」『』（）()：:；;]", "", text or "")
 
 
+def longest_common_substring(a: str, b: str) -> int:
+    """最长公共子串长度（滚动一维 DP）。
+
+    用它而不是 `in`：实测里模型「抄」示例的方式不是逐字复制，而是改一两个字
+    （示例的「我妈说过的是」变成「我妈说的是」）。精确子串匹配会把它判成原创，
+    而人一眼就能看出那是同一句话。
+    """
+    if not a or not b:
+        return 0
+    if len(a) < len(b):
+        a, b = b, a
+    prev = [0] * (len(b) + 1)
+    best = 0
+    for ch in a:
+        cur = [0] * (len(b) + 1)
+        for j, bj in enumerate(b, 1):
+            if ch == bj:
+                cur[j] = prev[j - 1] + 1
+                if cur[j] > best:
+                    best = cur[j]
+        prev = cur
+    return best
+
+
+def near_copy(text: str, lines: list[str], min_len: int = 10, ratio: float = 0.7) -> str | None:
+    """判断 text 是否近似照抄了 lines 里的某一句。
+
+    两个门槛同时成立才算抄：
+      · 最长公共子串 ≥ min_len（10 字，短于此的常见搭配不算）
+      · 该子串覆盖原句的 ≥ ratio（70%，允许改一两个字，不允许只借半句）
+
+    为什么需要 ratio：只按长度判会把「我也这样想过」这类通用句全判成抄。
+    """
+    t = _norm_for_copy(text)
+    if not t:
+        return None
+    for line in lines:
+        n = _norm_for_copy(line)
+        if len(n) < min_len:
+            continue
+        if n in t:
+            return str(line).strip()
+        # 先用 6 字窗口做一道廉价预筛：连一个 6 字片段都不重合，最长公共子串
+        # 必然 < min_len，不用跑 DP。shotbank 有 200 多行样本，
+        # 逐行跑 O(n·m) 的 DP 会让每个请求多花半秒，这道预筛把它压到几行。
+        if not any(n[i : i + 6] in t for i in range(len(n) - 5)):
+            continue
+        lcs = longest_common_substring(n, t)
+        if lcs >= min_len and lcs / len(n) >= ratio:
+            return str(line).strip()
+    return None
+
+
 def copied_from_shots(text: str, persona: Persona, min_len: int = 12) -> str | None:
-    """检查是否原样抄了人格包里的示例句。
+    """检查是否原样或近似抄了人格包里的示例句。
 
     这是个真实发生过的问题：给了 few_shots 之后，模型对「抢功劳」这类场景
-    会直接输出示例的第一句（「改名字这一步还挺费事的」），
-    用户每问一次得到同一句话。示例是用来传递节奏的，不是台词库。
+    会直接输出示例的第一句，用户每问一次得到同一句话。示例是传节奏的，不是台词库。
 
     为什么阈值是 12 而不是 10：v2 用 10 时，一条完整的 21 字句子
     和一句 7 字口癖用的是同一个尺子，而后者本来就不该算抄。
     12 的意思是：整句搬运算抄，口头禅不算。
+
+    v4 的补充：改成近似匹配（near_copy）。实测模型抄示例时会改一两个字，
+    精确子串匹配放过了它——这比完全照抄更难被发现，因为改过之后读起来更像人话。
     """
-    t = _norm_for_copy(text)
+    lines: list[str] = []
     for shot in persona.raw.get("few_shots") or []:
-        for line in str(shot.get("reply", "")).split("\n"):
-            n = _norm_for_copy(line)
-            if len(n) >= min_len and n in t:
-                return line.strip()
-    return None
+        lines.extend(str(shot.get("reply", "")).split("\n"))
+    return near_copy(text, lines, min_len=min_len, ratio=0.7)
 
 
 def check(

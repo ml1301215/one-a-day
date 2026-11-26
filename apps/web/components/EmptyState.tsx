@@ -2,34 +2,26 @@
 
 import type { Message } from "@/lib/types";
 
-export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
-  const starters: Array<{ tag: string; text: string }> = [
-    { tag: "职场", text: "今天又被领导当众说，我的方案没有灵魂。" },
-    { tag: "家里", text: "我妈又催婚了，说再不结婚就没人要了。" },
-    { tag: "路口", text: "我想辞职，但不敢。" },
-  ];
+const STARTERS = [
+  "今天又被领导当众说，方案没有灵魂。",
+  "我妈又催婚了。",
+  "我想辞职，但不敢。",
+];
 
+export function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="oad-empty">
-      <h2>
-        说点具体的。
-        <br />
-        抽象的话我接不住。
-      </h2>
-      <p>
-        这里不提供安慰，也不提供人生建议。你说一件今天真发生的事，我给你一句真话，
-        加一个今晚就能做的小动作。想听长的，说「展开讲讲」。
-      </p>
+      <h2 className="oad-empty__title">说点具体的。</h2>
+      <p className="oad-empty__hint">说一件今天真发生的事。想听长的，说「展开讲讲」。</p>
       <div className="oad-starters">
-        {starters.map((s) => (
+        {STARTERS.map((text) => (
           <button
-            key={s.tag}
+            key={text}
             type="button"
             className="oad-starter"
-            onClick={() => onPick(s.text)}
+            onClick={() => onPick(text)}
           >
-            <span>{s.tag}</span>
-            {s.text}
+            {text}
           </button>
         ))}
       </div>

@@ -18,7 +18,7 @@ export function Composer({ value, onChange, onSubmit, onStop, busy }: Props) {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [value]);
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -47,11 +47,23 @@ export function Composer({ value, onChange, onSubmit, onStop, busy }: Props) {
         aria-label="输入内容"
       />
       {busy ? (
-        <button type="button" className="oad-send" onClick={onStop}>
+        <button
+          type="button"
+          className="oad-send"
+          data-mode="stop"
+          onClick={onStop}
+          aria-label="停止生成"
+        >
           停
         </button>
       ) : (
-        <button type="submit" className="oad-send" disabled={!value.trim()}>
+        <button
+          type="submit"
+          className="oad-send"
+          data-mode="send"
+          disabled={!value.trim()}
+          aria-label="发送"
+        >
           发
         </button>
       )}

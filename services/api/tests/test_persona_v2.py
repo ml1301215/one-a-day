@@ -22,16 +22,25 @@ def persona():
     return get_persona(str(settings.persona_path))
 
 
-def test_persona_is_v3_with_engine(persona):
-    assert persona.version.startswith("3.")
+def test_persona_is_v4_with_engine_and_mind_model(persona):
+    assert persona.version.startswith("4.")
     raw = persona.raw
-    # v3 的核心结构必须存在：
+    # v4 的核心结构必须存在：
     # speech_engine 是「谐音伪因果」的发动机，缺了它等于退回 v2 的「只有语流」；
-    # real_quotes 是唯一一批他本人的句子，缺了它模型只能模仿我们的仿写。
-    for key in ("speech_engine", "real_quotes", "speech_rhythm", "verbal_tics",
-                "chat_shape", "anti_ai_flavor", "imagery_pool"):
+    # mind_model 是 v4 新增的「先注意什么 / 把错归给谁 / 什么时候不说话」，
+    # 缺了它，回复还是会退化成「每条都在解决问题」；
+    # seriousness 替代了 v3 的 safety，重话由性格承接，不由模板承接。
+    for key in ("speech_engine", "mind_model", "seriousness", "real_quotes",
+                "speech_rhythm", "verbal_tics", "chat_shape", "anti_ai_flavor",
+                "imagery_pool"):
         assert key in raw, f"人格包缺少 {key}"
     assert raw["speech_rhythm"].get("rules"), "语流规则不能为空"
+    assert raw["mind_model"].get("attention"), "mind_model 缺少 attention"
+    assert raw["seriousness"].get("how"), "seriousness 缺少 how"
+    # v3 的 L0–L3 分级表必须已经从人格包里消失
+    assert "safety" not in raw or not isinstance(raw.get("safety"), dict) or not raw["safety"].get("levels"), (
+        "人格包里还留着 L0–L3 分级表，说明安全分级没有真正退役"
+    )
 
 
 def test_system_prompt_injects_few_shots(persona):

@@ -1,21 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { levelHint, levelLabel, type Message, type Variant } from "@/lib/types";
+import type { Message, Variant } from "@/lib/types";
 
 type Props = {
   message: Message;
-  /** 只有最后一条才给「换个说法」——重生成依赖服务端的会话末尾 */
+  /** 只有最后一条才给「更损 / 更暖」——重生成依赖服务端的会话末尾 */
   canRegenerate: boolean;
   busy: boolean;
   onRegenerate: (variant: Variant) => void;
-  onFeedback?: (kind: "up" | "down") => void;
 };
 
-export function Slip({ message, canRegenerate, busy, onRegenerate, onFeedback }: Props) {
+export function Slip({ message, canRegenerate, busy, onRegenerate }: Props) {
   const [copied, setCopied] = useState(false);
-  const level = message.level;
-  const isCrisis = level === "L3";
+  const done = !message.streaming && message.content.length > 0;
 
   async function copy() {
     try {
@@ -28,69 +26,47 @@ export function Slip({ message, canRegenerate, busy, onRegenerate, onFeedback }:
   }
 
   return (
-    <article className="oad-slip" data-level={level ?? "L0"}>
-      <header className="oad-slip__head">
-        <span className="oad-slip__brand">一日一片</span>
-        <span className="oad-slip__tag" title={levelHint(level)}>
-          {levelLabel(level)}
-        </span>
-      </header>
-
-      <p className="oad-slip__body">
+    <article className="oad-reply">
+      <p className="oad-reply__body">
         {message.content}
-        {message.streaming ? <span className="oad-caret" aria-hidden /> : null}
+        {message.streaming ? <span className="oad-caret" aria-hidden="true" /> : null}
       </p>
 
-      {!message.streaming && message.content ? (
-        <footer className="oad-slip__foot">
-          {canRegenerate && !isCrisis ? (
+      {done ? (
+        <div className="oad-actions">
+          {canRegenerate ? (
             <>
               <button
                 type="button"
-                className="oad-chip"
+                className="oad-action"
                 disabled={busy}
+                aria-label="换个更损的说法"
                 onClick={() => onRegenerate("spicier")}
               >
-                更损一点
+                更损
               </button>
               <button
                 type="button"
-                className="oad-chip"
+                className="oad-action"
                 disabled={busy}
+                aria-label="换个更暖的说法"
                 onClick={() => onRegenerate("warmer")}
               >
-                更暖一点
+                更暖
               </button>
             </>
           ) : null}
 
-          <button type="button" className="oad-chip" onClick={copy} data-done={copied ? "1" : "0"}>
+          <button
+            type="button"
+            className="oad-action"
+            onClick={copy}
+            data-done={copied ? "1" : "0"}
+            aria-label="复制这条回复"
+          >
             {copied ? "已复制" : "复制"}
           </button>
-
-          {onFeedback ? (
-            <>
-              <button
-                type="button"
-                className="oad-chip"
-                aria-label="这句像"
-                title="像他，记一笔"
-                onClick={() => onFeedback("up")}
-              >
-                ◎ 像
-              </button>
-              <button
-                type="button"
-                className="oad-chip"
-                aria-label="这句不像"
-                title="不像，记一笔"
-                onClick={() => onFeedback("down")}
-              >
-                ○ 不像
-              </button>
-            </>
-          ) : null}
-        </footer>
+        </div>
       ) : null}
     </article>
   );

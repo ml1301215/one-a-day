@@ -28,6 +28,11 @@ services/api/data/
 
 # --- 评测产物 ---
 evals/report.json
+evals/fidelity_report.json
+
+# --- 蒸馏中间产物（产物入库，缓存不入库）---
+tools/distill/.cache/
+tools/distill/__pycache__/
 
 # --- 编辑器与系统 ---
 .vscode/

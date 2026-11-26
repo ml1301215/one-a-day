@@ -143,7 +143,10 @@
         <div class="kv"><span>照抄示例句</span><b id="q-copy" class="na">—</b></div>
         <div class="kv"><span>被闸门拦过</span><b id="q-rw" class="na">—</b></div>
         <div class="kv"><span>耗时</span><b id="q-ms" class="na">—</b></div>
-        <div class="kv"><span>情绪分级</span><b id="q-lv" class="na">—</b></div>
+        <div class="kv"><span>姿态 / 分级</span><b id="q-lv" class="na">—</b></div>
+        <div class="kv"><span>候选重排</span><b id="q-cand" class="na">—</b></div>
+        <div class="kv"><span>语料纹理</span><b id="q-tex" class="na">—</b></div>
+        <ul class="issues" id="q-cands"></ul>
         <ul class="issues" id="q-issues"></ul>
         <p class="hint" id="q-note"></p>
       </div>
@@ -168,10 +171,12 @@
           <li><b>「所以」几次。</b>真实语料每三轮才一个。这条里出现两次就是超量。</li>
           <li><b>有没有否定排位。</b>「不是因为我…是…」——真实弹幕峰值最高的一招。</li>
           <li><b>有没有能指认的东西。</b>数字、价钱、牌子、时间。三句里一个都没有＝抽象。</li>
-          <li><b>转场。</b>相邻两句接得上，隔一句必须断。句句接上是作文。</li>
-          <li><b>收场。</b>最后一句短不短。有没有一个「走开」的半步。</li>
+          <li><b>责任归给谁。</b>先往外推一格（不是你的问题），再往自己身上推一格。一步都不能少。</li>
+          <li><b>结尾是不是问句。</b>他不推动对话。用问句把球打回去的，是客服。</li>
           <li><b>有没有解释自己的梗。</b>出现「一个音」「念起来像」＝当场作废。</li>
         </ol>
+        <p class="hint">候选重排一栏会列出这一轮生成的所有候选和分数。挑中的是 ★。
+        分数是「离语料分布多远 + 有没有踩旧坑」，不是「写得好不好」——好坏只能靠上面的打分。</p>
       </div>
     </aside>
   </main>
